@@ -4,7 +4,7 @@ import numpy as np
 import scipy.integrate as sint
 
 
-class Solver2D(ABC):
+class Diagnostic2D(ABC):
     @abstractmethod
     def compute(self, x, y):
         
@@ -22,7 +22,7 @@ class Solver2D(ABC):
         self.xdim = len(self.x)
 
 
-class EulerianSolver2D(Solver2D, ABC):
+class EulerianDiagnostic2D(Diagnostic2D, ABC):
     @abstractmethod
     def compute(self, u, v, x, y):
         super().compute(x, y)
@@ -34,18 +34,18 @@ class EulerianSolver2D(Solver2D, ABC):
         if len(self.v.shape) != 2:
             raise ValueError("v must be a 2-dimensional array.")
  
-        if len(self.x.shape) != 2:
+        if len(self.u.shape) != 2:
             raise ValueError("u must be a 2-dimensional array.")
-    
 
-class FlowMapSolver(Solver2D):
+
+class LagrangianDiagnostic(Diagnostic2D):
     """ Calculates and stores the flow map for a 2 dimensional flow. """
     def __init__(self) -> None:
         super().__init__()
 
     def compute(
             self,
-            f: Callable[[float, tuple[float, float]], list],
+            f: Callable[[float, tuple[float, float]], tuple],
             t: tuple[float, float],
             x: np.ndarray[float, ...], 
             y: np.ndarray[float, ...], 
@@ -86,7 +86,7 @@ class FlowMapSolver(Solver2D):
         return self.flow_map
 
 
-class FTLESolver(FlowMapSolver):
+class FTLE(LagrangianDiagnostic):
     """ Calculates and stores the FTLE field for a 2 dimensional flow. """
     def __init__(self) -> None:
         super().__init__()
@@ -148,7 +148,7 @@ class FTLESolver(FlowMapSolver):
         return self.sigma
 
 
-class AttractionRateSolver(EulerianSolver2D):
+class AttractionRate(EulerianDiagnostic2D):
     """ Computes and stores the attraction and repulsion rate fields (s_1 & s_n) for a 2 
         dimensional flow.
     """
@@ -162,15 +162,14 @@ class AttractionRateSolver(EulerianSolver2D):
             y: np.ndarray[float, ...],
             edge_order: int=1
         ) -> tuple[np.ndarray, np.ndarray]:
-        """ Computes the FTLE field for a given vector field.
+        """ Computes the attraction rate and repulsion rate fields for a given vector field.
             Args:
                 x (np.ndarray): 1-d array containing the x-coordinates of the field.
                 y (np.ndarray): 1-d array containing the y-coordinates of the field. 
-                NOTE: function also accepts kwargs for scipy.integrate.solve_ivp.
             Returns:
                 flow_map (np.ndarray): The final position of the trajectories.
         """
-        super.compute(u, v, x, y)
+        super().compute(u, v, x, y)
 
         #Calculate the gradients of the velocity field
         dudy,dudx = np.gradient(self.u, self.y, self.x, edge_order=edge_order)
@@ -188,8 +187,8 @@ class AttractionRateSolver(EulerianSolver2D):
                 #Python's linalg module
                 if (dudx[i,j] and dudy[i,j] and dvdx[i,j] and dvdy[i,j]) is not np.ma.masked:
                     #If the data is not masked, compute s_1 and s_n
-                    Grad = np.array([[dudx[i,j], dudy[i,j]], [dvdx[i,j], dvdy[i,j]]])
-                    S = 0.5*(Grad + np.transpose(Grad))
+                    Gradient = np.array([[dudx[i,j], dudy[i,j]], [dvdx[i,j], dvdy[i,j]]])
+                    S = 0.5*(Gradient + np.transpose(Gradient))
                     eigenValues, _ = np.linalg.eig(S)
                     idx = eigenValues.argsort()
                     self.s1[i,j] = eigenValues[idx[0]]
@@ -199,15 +198,94 @@ class AttractionRateSolver(EulerianSolver2D):
                     #If the data is masked, then mask the grid point in the output.
                     self.s1[i,j] = np.ma.masked
                     self.sn[i,j] = np.ma.masked
+        
+        return self.s1, self.sn
 
 
 
+class Rhodot(EulerianDiagnostic2D):
+    """ Computes and stores the rhodot field for a 2 dimensional flow.
+    """
+    def __init__(self) -> None:
+        super().__init__()
 
-x = [[0,1,2]]
+    def compute(self,
+            u: np.ndarray[np.ndarray[float, ...], ...],
+            v: np.ndarray[np.ndarray[float, ...], ...],
+            x: np.ndarray[float, ...],
+            y: np.ndarray[float, ...],
+            edge_order: int=1
+        ) -> tuple[np.ndarray, np.ndarray]:
+        """ Computes the rhodot field for a given vector field.
+            Args:
+                x (np.ndarray): 1-d array containing the x-coordinates of the field.
+                y (np.ndarray): 1-d array containing the y-coordinates of the field. 
+                NOTE: function also accepts kwargs for scipy.integrate.solve_ivp.
+            Returns:
+                flow_map (np.ndarray): The final position of the trajectories.
+        """
+        super().compute(u, v, x, y)
+
+        #Calculate the gradients of the velocity field
+        dudy,dudx = np.gradient(self.u, self.y, self.x, edge_order=edge_order)
+        dvdy,dvdx = np.gradient(self.v, self.y, self.x, edge_order=edge_order)
+
+        #Initialize arrays for the attraction rate and repullsion rate
+        #Using masked arrays can be very useful when dealing with geophysical data and
+        #data with gaps in it.
+        self.rhodot = np.ma.empty([self.ydim, self.xdim])
+        self.nudot = np.ma.empty([self.ydim, self.xdim])
+        J = np.array([[0, 1], [-1, 0]])
+        for i in range(self.ydim):
+            for j in range(self.xdim):
+                #Make sure the data is not masked, masked gridpoints do not work with
+                #Python's linalg module
+                if (dudx[i,j] and dudy[i,j] and dvdx[i,j] and dvdy[i,j]) is not np.ma.masked:
+                    #If the data is not masked, compute s_1 and s_n
+                    Gradient = np.array([[dudx[i,j], dudy[i,j]], [dvdx[i,j], dvdy[i,j]]])
+                    S = 0.5*(Gradient + np.transpose(Gradient))
+                    Velocity = np.array([u[i, j], v[i, j]])
+                    Velocity_Squared = np.dot(Velocity, Velocity)
+                    if Velocity_Squared:
+                        self.rhodot[i, j] = np.dot(
+                            Velocity, np.dot(np.matmul(J.T, np.matmul(S, J)), Velocity)
+                        ) / Velocity_Squared
+                        self.nudot[i, j] = np.dot(
+                            Velocity,np.dot(np.trace(S) * np.identity(2) - 2 * S, Velocity)
+                        ) / Velocity_Squared
+                    else:
+                        #If V dot V = 0, then mask the grid point in the output.
+                        self.rhodot[i,j] = np.ma.masked
+                        self.nudot[i,j] = np.ma.masked
+                else:
+                    #If the data is masked, then mask the grid point in the output.
+                    self.rhodot[i,j] = np.ma.masked
+                    self.nudot[i,j] = np.ma.masked
+        return self.rhodot, self.nudot
+
+
+x = [0,1,2]
 y = [0,1]
 # x, y = np.meshgrid(x,y)
-from dynlab.velocity_fields import double_gyre
-from dynlab.solvers import FTLESolver
-print(FTLESolver().compute(double_gyre, (2, 0), x, y))
+from dynlab.flows import double_gyre, bickley_jet
+from dynlab.diagnostics import FTLE
+print(FTLE().compute(double_gyre, (2, 0), x, y))
+
+from dynlab.diagnostics import AttractionRate, Rhodot
+u,v = double_gyre(0, np.meshgrid(x,y))
+print(AttractionRate().compute(u, v, x, y))
 
 
+print(Rhodot().compute(u, v, x, y))
+
+x = np.linspace(0,5,101)
+y = np.linspace(-1,1,41)
+# x, y = np.meshgrid(x,y)
+
+# f = FTLESolver().compute(bickley_jet, (2, 0), x, y)
+
+u,v = bickley_jet(0, np.meshgrid(x,y))
+a = AttractionRate().compute(u, v, x, y)[1]
+
+r = Rhodot().compute(u, v, x, y)[1]
+x,y=np.meshgrid(x,y)
