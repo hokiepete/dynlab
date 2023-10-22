@@ -17,9 +17,9 @@ def double_gyre(
         Args:
             t (float): the timestep of the flow.
             Y (tuple): the x and y coordinates of the point in the flow (x, y).
-            A (float): weight to experiment with. Default is 0.1.
-            w (float): weight to experiment with. Default is 0.2*pi.
-            e (float): weight to experiment with. Default is 0.25.
+            A (float): amplitude of the gyre velocity. Default is 0.1.
+            w (float): frequency of the driving force. Default is 0.2*pi.
+            e (float): strength of the driving force. Default is 0.25.
         Returns:
             u (float): the u velocity component.
             v (float): the v velocity component.
@@ -142,79 +142,190 @@ def sigmoidal(t: float, Y: tuple[float, float]) -> tuple[float, float]:
     return u, v
 
 
-def duffing_oscillator(t,Y):
+def autonomous_duffing_oscillator(_: float, Y: tuple[float, float]) -> tuple[float, float]:
+    """ time-independent duffing oscillator flow.
+        Args:
+            _ (float): the timestep of the flow, not used but necessary for passing the flow to ODE
+                integrators like scipy.integrate.solve_ivp.
+            Y (tuple): the x and y coordinates of the point in the flow (x, y).
+        Returns:
+            u (float): the u velocity component.
+            v (float): the v velocity component.
+    """
     u = Y[1]
-    v = Y[0] - Y[0]*Y[0]*Y[0]
-    return [u,v]
-  
-def campagnola(t,Y,pendulum_amplitude=0.5):
-    u = 0.0
-    if(Y[0]<pendulum_amplitude*t+5): 
-        v = 1.0
-    else:
-        v = -1.0
-    return [u,v]
+    v = Y[0] - Y[0]**3
+    return u, v
 
-def pendulum(t,Y,pendulum_amplitude=0.5):
+
+def duffing_oscillator(
+    t: float, Y: tuple[float, float], A: float = 0.3, gamma: float = 0.2, omega: float = 1.0
+) -> tuple[float, float]:
+    """ time-dependent duffing oscillator flow.
+        Args:
+            t (float): the timestep of the flow.
+            Y (tuple): the x and y coordinates of the point in the flow (x, y).
+            A (float): is the strength of the driving force. Default is 0.3.
+            gamma (float): is the coefficient of friction. Default is 0.2.
+            omega (float): is the frequency of oscillation. Default is 1.0
+        Returns:
+            u (float): the u velocity component.
+            v (float): the v velocity component.
+    """
     u = Y[1]
-    v = -np.sin(Y[0])-pendulum_amplitude*Y[1]*np.sin(np.pi*t)
-    return [u,v]
+    v = Y[0] - Y[0]**3 - gamma*Y[1] + A*np.sin(omega*t)
+    return u, v
 
-  
-def hurricane(t,Y,eye_alpha=0.2,eye_omega=0.8,eye_amplitude=0.4):
+
+def pendulum(
+    t: float, Y: tuple[float, float], A: float = 0.5, gamma: float = 0.0, omega: float = np.pi
+) -> tuple[float, float]:
+    """ time-dependent pendulum flow.
+        Args:
+            t (float): the timestep of the flow.
+            Y (tuple): the x and y coordinates of the point in the flow (x, y).
+            A (float): amplitude of the forcing.
+            omega (float): the frequency of the forcing.
+            gamma (float): the damping coefficent.
+        Returns:
+            u (float): the u velocity component.
+            v (float): the v velocity component.
+    """
+    u = Y[1]
+    v = -np.sin(Y[0]) - gamma*Y[1] + A*np.sin(omega*t)
+    return u, v
+
+
+def hurricane(
+    t: float,
+    Y: tuple[float, float],
+    eye_alpha: float = 0.2,
+    eye_omega: float = 0.8,
+    eye_amplitude: float = 0.4
+) -> tuple[float, float]:
+    """ time-dependent flow simulating a hurricane centered on x=0, y=1.
+        Args:
+            t (float): the timestep of the flow.
+            Y (tuple): the x and y coordinates of the point in the flow (x, y).
+            eye_alpha (float): weight to experiment with. Default is 0.2.
+            eye_omega (float): frequency of eye rotation. Default is 0.8.
+            eye_amplitude (float): amplitude of the eye. Default is 0.4
+        Returns:
+            u (float): the u velocity component.
+            v (float): the v velocity component.
+    """
     sqrtterm = np.sqrt(1.0+4.0*eye_alpha)
     beta = 1.0/sqrtterm
     yterm = Y[1]-0.5*(1.0+sqrtterm)
-  
-    u = -yterm/(Y[0]*Y[0]+yterm*yterm+eye_alpha) - beta
-    v = Y[0]/(Y[0]*Y[0]+yterm*yterm+eye_alpha) + eye_amplitude*Y[1]*np.cos(eye_omega*t)
-    return [u,v]
-  
-def wedge(t,Y,W_lambda=0.5,W_alpha=0.5,W_beta=0.5,W_K0=0.5):
-  
-    c1 = np.cos(W_lambda*Y[1])
-    s1 = np.sin(W_lambda*Y[1])
-  
-    c2 = np.cos((W_lambda-2.0)*Y[1])
-    s2 = np.sin((W_lambda-2.0)*Y[1])
-  
-    psi_theta = np.real(pow(Y[0],W_lambda)*W_K0*(-W_alpha*W_lambda*s1 + (W_lambda-2.0)*W_beta*s2))
-    psi_r = np.real(W_lambda*pow(Y[0],W_lambda-1.0)*W_K0*(W_alpha*c1 - W_beta*c2))
-  
-    u = 2.0*np.pi*psi_theta/Y[0]
-    v = -2.0*np.pi*psi_r/Y[0]
-    return [u,v]
-
-def weight(t,Y):
-    weight = 0.1+np.exp(-(Y[0]*Y[0]+Y[1]*Y[1])/4.0)
-    u = (-2*Y[1]-Y[1]*Y[1])*weight
-    v = (2*Y[0]-Y[0]*Y[1])*weight
-    return [u,v]
-
-def van_der_pol_oscillator(t,Y,epsilon=0.01,a=0.575):
-    u = 1/epsilon*(Y[1]+Y[0]-Y[0]**3)
-    v = a - Y[0]
-    return [u,v]
-
-def kevrekidis(t,Y, eps=0.01):
-  return [-Y[0]-Y[1]+2, 1/eps*(Y[0]**3-Y[1])]
-
-def ex11(t,Y):
-  return [-(np.tanh(Y[0]**2/4)+Y[0]),-(Y[0]+2*Y[1])]
-
-def rotHoop(t,Y, eps=0.1, gamma=2.3):
-  u = Y[1]
-  v = 1/eps*(np.sin(Y[0])*(gamma*np.cos(Y[0])-1)-Y[1])
-  return u, v
+    u = -yterm / (Y[0]**2 + yterm**2 + eye_alpha) - beta
+    v = Y[0] / (Y[0]**2 + yterm**2 + eye_alpha) + eye_amplitude*Y[1]*np.cos(eye_omega*t)
+    return u, v
 
 
-def verhulst(t,Y, eps=0.01):
-  return [1, 1/eps*(Y[0]*Y[1]-Y[1]**2)]
+def van_der_pol_oscillator(
+    t: float, Y: tuple[float, float], A: float = 0.2, mu: float = 2.0,
+    gamma: float = 0.1, omega: float = np.pi
+):
+    """ time-dependent van der pol oscillator flow.
+        Args:
+            t (float): the timestep of the flow.
+            Y (tuple): the x and y coordinates of the point in the flow (x, y).
+            A (float): amplitude of the forcing.
+            omega (float): the frequency of the forcing.
+            gamma (float): the damping coefficent.
+        Returns:
+            u (float): the u velocity component.
+            v (float): the v velocity component.
+    """
+    u = Y[1]
+    v = mu*(1 - Y[0]**2)*Y[1] - Y[0] - gamma*Y[1] + A*np.sin(omega*t)
+    return u, v
 
-def abc(t,Y, ABC_Amplitude=0.0):
-  Ap = np.sqrt(3)
-  Bp = np.sqrt(2)
-  u = (Ap+ABC_Amplitude*np.sin(np.pi*t))*np.sin(Y[2]) + np.cos(Y[1])
-  v = Bp*np.sin(Y[0]) + (Ap+ABC_Amplitude*np.sin(np.pi*t))*np.cos(Y[2])
-  w = np.sin(Y[1]) + Bp*np.cos(Y[0])
-  return [u,v,w]
+
+def bead_on_a_rotating_hoop(
+    _: float, Y: tuple[float, float], epsilon: float = 0.1, gamma: float = 2.3
+) -> tuple[float, float]:
+    """ time-independent bead on a rotating hoop flow.
+        Args
+            _ (float): the timestep of the flow, not used but necessary for passing the flow to ODE
+                integrators like scipy.integrate.solve_ivp.
+            Y (tuple): the x and y coordinates of the point in the flow (x, y).
+            epsilon (float): a dimensionless parameter from the mass, radius, gravity, and damping
+                of the system. A smaller eps equates to a larger damping. Default is 0.1.
+            gamma (float): a dimensionless parameter from the radius, rotational speed, and gravity
+                of the system. A smaller gamma equates to a slower hoop. Default is 2.3.
+        Returns:
+            u (float): the u velocity component.
+            v (float): the v velocity component.
+    """
+    u = Y[1]
+    v = (1 / epsilon)*(np.sin(Y[0])*(gamma*np.cos(Y[0]) - 1) - Y[1])
+    return u, v
+
+
+def lotka_volterra(
+    _: float, Y: tuple[float, float], alpha: float = 2.0/3.0,
+    beta: float = 4.0/3.0, gamma: float = 1.0, delta: float = 1.0
+):
+    """ time-independent bead on a Lotka Volterra flow.
+        Args
+            _ (float): the timestep of the flow, not used but necessary for passing the flow to ODE
+                integrators like scipy.integrate.solve_ivp.
+            Y (tuple): the x and y coordinates of the point in the flow (x, y).
+            alpha (float): maximum prey per capita growth rate. Default is 2/3.
+            beta (float): the effect of predators on the prey growth rate. Default is 4/3.
+            gamma (float): the predators per capita death rate. Default is 1.0.
+            delta (float): the effect of prey on the predators growth rate. Default is 1.0.
+        Returns:
+            u (float): the u velocity component.
+            v (float): the v velocity component.
+    """
+    u = alpha*Y[0] - beta*Y[0]*Y[1]
+    v = delta*Y[0]*Y[1] - gamma*Y[1]
+    return u, v
+
+
+def abc(
+    t: float, Y: tuple[float, float, float], ABC_Amplitude: float = 0.0,
+    A: float = np.sqrt(3), B: float = np.sqrt(2), C: float = 1.0
+) -> tuple[float, float, float]:
+    """ time-dependent Arnold-Beltrami-Childress flow.
+        Args:
+            t (float): the timestep of the flow.
+            Y (tuple): the x and y coordinates of the point in the flow (x, y, z).
+            ABC_Amplitude (float): amplitude of the forcing. Default is 0.0.
+            A (float): parameter partially controlling flow amplitude in u and v.
+            B (float): parameter partially controlling flow amplitude in v and w.
+            C (float): parameter partially controlling flow amplitude in w and u.
+        Returns:
+            u (float): the u velocity component.
+            v (float): the v velocity component.
+            w (float): the v velocity component.
+    """
+    u = (A+ABC_Amplitude*np.sin(np.pi*t))*np.sin(Y[2]) + C*np.cos(Y[1])
+    v = B*np.sin(Y[0]) + (A+ABC_Amplitude*np.sin(np.pi*t))*np.cos(Y[2])
+    w = C*np.sin(Y[1]) + B*np.cos(Y[0])
+    return u, v, w
+
+
+def lorenz(
+    _: float, Y: tuple[float, float, float], sigma: float = 10.0,
+    rho: float = 28.0, beta: float = 8.0/3.0
+) -> tuple[float, float, float]:
+    """ time-independent Lorenz system flow. NOTE: when using default parameters system will
+            exhibit chaotic behavor and yield a strange attractor.
+        Args
+            _ (float): the timestep of the flow, not used but necessary for passing the flow to ODE
+                integrators like scipy.integrate.solve_ivp.
+            Y (tuple): the x and y coordinates of the point in the flow (x, y, z).
+            sigma (float): tunable parameter. Default is 10.0.
+            rho (float): tunable parameter. Default is 4/3.
+            beta (float): tunable parameter. Default is 1.0.
+        Returns:
+            u (float): the u velocity component.
+            v (float): the v velocity component.
+            w (float): the v velocity component.
+    """
+    u = sigma*(Y[1] - Y[0])
+    v = Y[0]*(rho - Y[2]) - Y[1]
+    w = Y[0]*Y[1] - beta*Y[2]
+    return u, v, w
