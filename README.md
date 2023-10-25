@@ -12,5 +12,6 @@ from dynlab.diagnostics import FTLE
 from dynlab.flows import double_gyre
 x = np.linspace(0, 2, 101)
 y = np.linspace(0, 1, 101)
-ftle = FTLE().compute(x, y, double_gyre, (10, 0), edge_order=2, rtol=1e-8, atol=1e-8)```
+ftle = FTLE().compute(x, y, double_gyre, (10, 0), edge_order=2, rtol=1e-8, atol=1e-8)
+```
 ![alt text](https://github.com/hokiepete/docs/blob/main/double_gyre.png)
