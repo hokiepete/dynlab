@@ -266,7 +266,7 @@ class Rhodot(EulerianDiagnostic2D):
         v: np.ndarray[np.ndarray[float, ...], ...] = None,
         f: Callable[[float, tuple[float, float]], tuple] = None,
         t: float = None,
-        edge_order: int=1
+        edge_order: int = 1
     ) -> tuple[np.ndarray, np.ndarray]:
         """ Computes the rhodot field for a given vector field.
             Args:
@@ -302,7 +302,7 @@ class Rhodot(EulerianDiagnostic2D):
                     # If the data is not masked, compute s_1 and s_n
                     Gradient = np.array([[dudx[i, j], dudy[i, j]], [dvdx[i, j], dvdy[i, j]]])
                     S = 0.5*(Gradient + np.transpose(Gradient))
-                    Velocity = np.array([u[i, j], v[i, j]])
+                    Velocity = np.array([self.u[i, j], self.v[i, j]])
                     Velocity_Squared = np.dot(Velocity, Velocity)
                     if Velocity_Squared:
                         self.rhodot[i, j] = np.dot(
