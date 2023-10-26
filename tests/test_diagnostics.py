@@ -20,36 +20,36 @@ def test_attraction_rate_with_function():
     x = [0, 1, 2]
     y = [0, 1]
     t = 0
-    expected_s1 = np.array([
+    expected_attraction_rate = np.array([
         [-3.84734139e-17, -5.44096237e-17, -9.08234100e-18],
         [-6.16297582e-33, -7.69468277e-17, -1.24502583e-16]
     ])
 
-    expected_sn = np.array([
+    expected_repulsion_rate = np.array([
         [3.84734139e-17, 5.44096237e-17, 1.62975996e-16],
         [7.69468277e-17, 6.16297582e-33, 4.75557549e-17]
     ])
-    s1, sn = AttractionRate().compute(x, y, f=double_gyre, t=t)
-    assert np.allclose(expected_s1, s1)
-    assert np.allclose(expected_sn, sn)
+    attraction_rate, repulsion_rate = AttractionRate().compute(x, y, f=double_gyre, t=t)
+    assert np.allclose(expected_attraction_rate, attraction_rate)
+    assert np.allclose(expected_repulsion_rate, repulsion_rate)
 
 
 def test_attraction_rate_with_velocity():
     x = [0, 1, 2]
     y = [0, 1]
     u, v = double_gyre(0, np.meshgrid(x, y))
-    expected_s1 = np.array([
+    expected_attraction_rate = np.array([
         [-3.84734139e-17, -5.44096237e-17, -9.08234100e-18],
         [-6.16297582e-33, -7.69468277e-17, -1.24502583e-16]
     ])
 
-    expected_sn = np.array([
+    expected_repulsion_rate = np.array([
         [3.84734139e-17, 5.44096237e-17, 1.62975996e-16],
         [7.69468277e-17, 6.16297582e-33, 4.75557549e-17]
     ])
-    s1, sn = AttractionRate().compute(x, y, u=u, v=v)
-    assert np.allclose(expected_s1, s1)
-    assert np.allclose(expected_sn, sn)
+    attraction_rate, repulsion_rate = AttractionRate().compute(x, y, u=u, v=v)
+    assert np.allclose(expected_attraction_rate, attraction_rate)
+    assert np.allclose(expected_repulsion_rate, repulsion_rate)
 
 
 def test_rhodot_with_function():

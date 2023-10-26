@@ -149,7 +149,7 @@ class FTLE(LagrangianDiagnostic):
                 t (tuple): the time interval over which to calculate FTLE values, t0 to tf.
                 NOTE: function also accepts kwargs for scipy.integrate.solve_ivp.
             Returns:
-                sigma (np.ndarray): The FTLE field for the given flow.
+                ftle (np.ndarray): The FTLE field for the given flow.
         """
 
         # computes the flow map
@@ -164,7 +164,7 @@ class FTLE(LagrangianDiagnostic):
         )
 
         # initialize FTLE matrix
-        self.sigma = np.ma.empty([self.ydim, self.xdim])
+        self.ftle = np.ma.empty([self.ydim, self.xdim])
 
         for i in range(self.ydim):
             for j in range(self.xdim):
@@ -177,17 +177,17 @@ class FTLE(LagrangianDiagnostic):
                     JF = np.array([[dfxdx[i, j], dfxdy[i, j]], [dfydx[i, j], dfydy[i, j]]])
                     C = np.dot(JF.T, JF)
 
-                    # Calculate FTLE, sigma
+                    # Calculate FTLE
                     lambda_max = np.max(np.linalg.eig(C)[0])
                     if lambda_max >= 1:
-                        self.sigma[i, j] = 1.0 / (2.0*abs(t[-1] - t[0]))*np.log(lambda_max)
+                        self.ftle[i, j] = 1.0 / (2.0*abs(t[-1] - t[0]))*np.log(lambda_max)
                     else:
-                        self.sigma[i, j] = 0
+                        self.ftle[i, j] = 0
                 else:
                     # If the data is masked, then mask the grid point in the output.
-                    self.sigma[i, j] = np.ma.masked
+                    self.ftle[i, j] = np.ma.masked
 
-        return self.sigma
+        return self.ftle
 
 
 class AttractionRate(EulerianDiagnostic2D):
@@ -218,8 +218,8 @@ class AttractionRate(EulerianDiagnostic2D):
                     the x position and the y position [x, y].
                 t (float): the time step at which f will calculate u and v.
             Returns:
-                s1 (np.ndarray): The attraction rate field.
-                sn (np.ndarray): The repulsion rate field.
+                attraction_rate (np.ndarray): The attraction rate field.
+                repulsion_rate (np.ndarray): The repulsion rate field.
         """
         super().compute(x, y, u, v, f, t)
 
@@ -230,8 +230,8 @@ class AttractionRate(EulerianDiagnostic2D):
         # Initialize arrays for the attraction rate and repullsion rate
         # Using masked arrays can be very useful when dealing with geophysical data and
         # data with gaps in it.
-        self.s1 = np.ma.empty([self.ydim, self.xdim])
-        self.sn = np.ma.empty([self.ydim, self.xdim])
+        self.attraction_rate = np.ma.empty([self.ydim, self.xdim])
+        self.repulsion_rate = np.ma.empty([self.ydim, self.xdim])
 
         for i in range(self.ydim):
             for j in range(self.xdim):
@@ -243,13 +243,13 @@ class AttractionRate(EulerianDiagnostic2D):
                     S = 0.5*(Gradient + np.transpose(Gradient))
                     eigenValues, _ = np.linalg.eig(S)
                     idx = eigenValues.argsort()
-                    self.s1[i, j] = eigenValues[idx[0]]
-                    self.sn[i, j] = eigenValues[idx[-1]]
+                    self.attraction_rate[i, j] = eigenValues[idx[0]]
+                    self.repulsion_rate[i, j] = eigenValues[idx[-1]]
                 else:
                     # If the data is masked, then mask the grid point in the output.
-                    self.s1[i, j] = np.ma.masked
-                    self.sn[i, j] = np.ma.masked
-        return self.s1, self.sn
+                    self.attraction_rate[i, j] = np.ma.masked
+                    self.repulsion_rate[i, j] = np.ma.masked
+        return self.attraction_rate, self.repulsion_rate
 
 
 class Rhodot(EulerianDiagnostic2D):
