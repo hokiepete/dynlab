@@ -10,8 +10,8 @@ Note that dynlab is written with python 3.11 and you may need to update your pyt
 import matplotlib.pyplot as plt
 from dynlab.diagnostics import FTLE
 from dynlab.flows import double_gyre
-x = np.linspace(0, 2, 401)
-y = np.linspace(0, 1, 401)
+x = np.linspace(0, 2, 101)
+y = np.linspace(0, 1, 101)
 ftle = FTLE().compute(x, y, double_gyre, (10, 0), edge_order=2, rtol=1e-8, atol=1e-8)
 plt.pcolormesh(x, y, ftle, shading='gouraud')
 ```
@@ -21,8 +21,8 @@ plt.pcolormesh(x, y, ftle, shading='gouraud')
 import matplotlib.pyplot as plt
 from dynlab.diagnostics import AttractionRate
 from dynlab.flows import double_gyre
-x = np.linspace(0, 20000, 401)
-y = np.linspace(-4000, 4000, 401)
+x = np.linspace(0, 20000, 101)
+y = np.linspace(-4000, 4000, 101)
 u, v = bickley_jet(0, np.meshgrid(x, y))
 attraction_rate, repulsion_rate = AttractionRate().compute(x, y, u=u, v=v, edge_order=2)
 # note that lower values of the attraction rate field equate to higher levels of attraction
