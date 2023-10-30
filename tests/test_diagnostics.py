@@ -12,7 +12,16 @@ def test_ftle():
     ])
     assert np.allclose(
         expected_ftle,
-        FTLE().compute(x, y, double_gyre, (2, 0))
+        FTLE().compute(x, y, double_gyre, (2, 0), solver='solve_ivp')
+    )
+
+    expected_ftle = np.array([
+        [0.04001625, 0.16099239, 0.000000],
+        [0.00000000, 0.16099239, 0.226121]
+    ])
+    assert np.allclose(
+        expected_ftle,
+        FTLE().compute(x, y, double_gyre, (2, 0), solver='odeint')
     )
 
 

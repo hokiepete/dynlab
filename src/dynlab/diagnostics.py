@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Callable
+from itertools import product
 import numpy as np
 import scipy.integrate as sint
 
@@ -88,6 +89,7 @@ class LagrangianDiagnostic(Diagnostic2D):
         y: np.ndarray[float, ...],
         f: Callable[[float, tuple[float, float]], tuple],
         t: tuple[float, float],
+        solver: str = 'odeint',
         **kwargs
     ) -> np.ndarray[np.ndarray[float, ...], ...]:
         """ Computes the flow map for a given vector field.
@@ -100,7 +102,13 @@ class LagrangianDiagnostic(Diagnostic2D):
                     arguments time (scalar) and position (vector), e.g. f(t, Y) where Y contains
                     the x position and the y position [x, y].
                 t (tuple): the time interval over which to calculate trajectories, t0 to tf.
-                NOTE: function also accepts kwargs for scipy.integrate.solve_ivp.
+                solver (string): determines which ode solving function will be used. Options are
+                    'solve_ivp' and 'odeint'. solve_ivp is a more modern ode solver with options
+                    for different methods such as 'LSODA', 'rk45', etc. odeint is an older
+                    implementation that only uses 'LSODA', however it is written in fortran and
+                    significantly faster than solve_ivp. Default is 'odeint'.
+                NOTE: function also accepts kwargs for scipy.integrate.solve_ivp or
+                    scipy.integrate.odeint depending on which solver is selected.
             Returns:
                 flow_map (np.ndarray): The final position of the trajectories.
         """
@@ -113,15 +121,23 @@ class LagrangianDiagnostic(Diagnostic2D):
         self.flow_map = np.empty([self.ydim, self.xdim, 2])
 
         # integrate velocity field
-        idx = 0
-        for i, y0 in enumerate(self.y):
-            for j, x0 in enumerate(self.x):
+        if solver == 'solve_ivp':
+            for (i, y0), (j, x0) in product(enumerate(self.y), enumerate(self.x)):
                 sol = sint.solve_ivp(
                     f, t, (x0, y0), **kwargs
                 )
-                self.flow_map[i, j,:] = sol.y[:,-1]
-                idx += 1
-
+                self.flow_map[i, j, :] = sol.y[:, -1]
+        elif solver == 'odeint':
+            for (i, y0), (j, x0) in product(enumerate(self.y), enumerate(self.x)):
+                sol = sint.odeint(
+                    f, (x0, y0), t, tfirst=True, **kwargs
+                )
+                self.flow_map[i, j, :] = sol[-1, :]
+        else:
+            raise ValueError(
+                f'Unknown value "{solver}" for solver argument. Must choose either "solve_ivp" '
+                + 'or "odeint.'
+            )
         return self.flow_map
 
 
@@ -166,26 +182,25 @@ class FTLE(LagrangianDiagnostic):
         # initialize FTLE matrix
         self.ftle = np.ma.empty([self.ydim, self.xdim])
 
-        for i in range(self.ydim):
-            for j in range(self.xdim):
-                # Make sure the data is not masked, masked gridpoints do not work with
-                # Python's linalg module
-                if (
-                    dfxdx[i, j] and dfxdy[i, j] and dfydx[i, j] and dfydy[i, j]
-                ) is not np.ma.masked:
-                    # Calculate Cauchy-Green tensor, C
-                    JF = np.array([[dfxdx[i, j], dfxdy[i, j]], [dfydx[i, j], dfydy[i, j]]])
-                    C = np.dot(JF.T, JF)
+        for i, j in product(range(self.ydim), range(self.xdim)):
+            # Make sure the data is not masked, masked gridpoints do not work with
+            # Python's linalg module
+            if (
+                dfxdx[i, j] and dfxdy[i, j] and dfydx[i, j] and dfydy[i, j]
+            ) is not np.ma.masked:
+                # Calculate Cauchy-Green tensor, C
+                JF = np.array([[dfxdx[i, j], dfxdy[i, j]], [dfydx[i, j], dfydy[i, j]]])
+                C = np.dot(JF.T, JF)
 
-                    # Calculate FTLE
-                    lambda_max = np.max(np.linalg.eig(C)[0])
-                    if lambda_max >= 1:
-                        self.ftle[i, j] = 1.0 / (2.0*abs(t[-1] - t[0]))*np.log(lambda_max)
-                    else:
-                        self.ftle[i, j] = 0
+                # Calculate FTLE
+                lambda_max = np.max(np.linalg.eig(C)[0])
+                if lambda_max >= 1:
+                    self.ftle[i, j] = 1.0 / (2.0*abs(t[-1] - t[0]))*np.log(lambda_max)
                 else:
-                    # If the data is masked, then mask the grid point in the output.
-                    self.ftle[i, j] = np.ma.masked
+                    self.ftle[i, j] = 0
+            else:
+                # If the data is masked, then mask the grid point in the output.
+                self.ftle[i, j] = np.ma.masked
 
         return self.ftle
 
@@ -233,23 +248,22 @@ class AttractionRate(EulerianDiagnostic2D):
         self.attraction_rate = np.ma.empty([self.ydim, self.xdim])
         self.repulsion_rate = np.ma.empty([self.ydim, self.xdim])
 
-        for i in range(self.ydim):
-            for j in range(self.xdim):
-                # Make sure the data is not masked, masked gridpoints do not work with
-                # Python's linalg module
-                if (dudx[i, j] and dudy[i, j] and dvdx[i, j] and dvdy[i, j]) is not np.ma.masked:
-                    # If the data is not masked, compute s_1 and s_n
-                    Gradient = np.array([[dudx[i, j], dudy[i, j]], [dvdx[i, j], dvdy[i, j]]])
-                    S = 0.5*(Gradient + np.transpose(Gradient))
-                    eigenValues, _ = np.linalg.eig(S)
-                    idx = eigenValues.argsort()
-                    self.attraction_rate[i, j] = eigenValues[idx[0]]
-                    self.repulsion_rate[i, j] = eigenValues[idx[-1]]
-                else:
-                    # If the data is masked, then mask the grid point in the output.
-                    self.attraction_rate[i, j] = np.ma.masked
-                    self.repulsion_rate[i, j] = np.ma.masked
-        return self.attraction_rate, self.repulsion_rate
+        for i, j in product(range(self.ydim), range(self.xdim)):
+            # Make sure the data is not masked, masked gridpoints do not work with
+            # Python's linalg module
+            if (dudx[i, j] and dudy[i, j] and dvdx[i, j] and dvdy[i, j]) is not np.ma.masked:
+                # If the data is not masked, compute s_1 and s_n
+                Gradient = np.array([[dudx[i, j], dudy[i, j]], [dvdx[i, j], dvdy[i, j]]])
+                S = 0.5*(Gradient + np.transpose(Gradient))
+                eigenValues, _ = np.linalg.eig(S)
+                idx = eigenValues.argsort()
+                self.attraction_rate[i, j] = eigenValues[idx[0]]
+                self.repulsion_rate[i, j] = eigenValues[idx[-1]]
+            else:
+                # If the data is masked, then mask the grid point in the output.
+                self.attraction_rate[i, j] = np.ma.masked
+                self.repulsion_rate[i, j] = np.ma.masked
+       return self.attraction_rate, self.repulsion_rate
 
 
 class Rhodot(EulerianDiagnostic2D):
@@ -294,29 +308,28 @@ class Rhodot(EulerianDiagnostic2D):
         self.rhodot = np.ma.empty([self.ydim, self.xdim])
         self.nudot = np.ma.empty([self.ydim, self.xdim])
         J = np.array([[0, 1], [-1, 0]])
-        for i in range(self.ydim):
-            for j in range(self.xdim):
-                # Make sure the data is not masked, masked gridpoints do not work with
-                # Python's linalg module
-                if (dudx[i, j] and dudy[i, j] and dvdx[i, j] and dvdy[i, j]) is not np.ma.masked:
-                    # If the data is not masked, compute s_1 and s_n
-                    Gradient = np.array([[dudx[i, j], dudy[i, j]], [dvdx[i, j], dvdy[i, j]]])
-                    S = 0.5*(Gradient + np.transpose(Gradient))
-                    Velocity = np.array([self.u[i, j], self.v[i, j]])
-                    Velocity_Squared = np.dot(Velocity, Velocity)
-                    if Velocity_Squared:
-                        self.rhodot[i, j] = np.dot(
-                            Velocity, np.dot(np.matmul(J.T, np.matmul(S, J)), Velocity)
-                        ) / Velocity_Squared
-                        self.nudot[i, j] = np.dot(
-                            Velocity, np.dot(np.trace(S) * np.identity(2) - 2 * S, Velocity)
-                        ) / Velocity_Squared
-                    else:
-                        # If V dot V = 0, then mask the grid point in the output.
-                        self.rhodot[i, j] = np.ma.masked
-                        self.nudot[i, j] = np.ma.masked
+        for i, j in product(range(self.ydim), range(self.xdim)):
+            # Make sure the data is not masked, masked gridpoints do not work with
+            # Python's linalg module
+            if (dudx[i, j] and dudy[i, j] and dvdx[i, j] and dvdy[i, j]) is not np.ma.masked:
+                # If the data is not masked, compute s_1 and s_n
+                Gradient = np.array([[dudx[i, j], dudy[i, j]], [dvdx[i, j], dvdy[i, j]]])
+                S = 0.5*(Gradient + np.transpose(Gradient))
+                Velocity = np.array([self.u[i, j], self.v[i, j]])
+                Velocity_Squared = np.dot(Velocity, Velocity)
+                if Velocity_Squared:
+                    self.rhodot[i, j] = np.dot(
+                        Velocity, np.dot(np.matmul(J.T, np.matmul(S, J)), Velocity)
+                    ) / Velocity_Squared
+                    self.nudot[i, j] = np.dot(
+                        Velocity, np.dot(np.trace(S) * np.identity(2) - 2 * S, Velocity)
+                    ) / Velocity_Squared
                 else:
-                    # If the data is masked, then mask the grid point in the output.
+                    # If V dot V = 0, then mask the grid point in the output.
                     self.rhodot[i, j] = np.ma.masked
                     self.nudot[i, j] = np.ma.masked
+            else:
+                # If the data is masked, then mask the grid point in the output.
+                self.rhodot[i, j] = np.ma.masked
+                self.nudot[i, j] = np.ma.masked
         return self.rhodot, self.nudot
