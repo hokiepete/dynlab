@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import Callable
 from itertools import product
+
 import numpy as np
 import scipy.integrate as sint
+
 
 
 class Diagnostic2D(ABC):
@@ -29,6 +31,20 @@ class Diagnostic2D(ABC):
 
         self.ydim = len(self.y)
         self.xdim = len(self.x)
+
+    @staticmethod
+    def not_masked(*args):
+        """ staticmethod to ensure the derivatives are not masked before calculating the strain or
+            rate-of-strain tensors.
+            Args:
+                *args: values to check for masks.
+            Returns:
+                (bool): True when none of the args are masked, false when at least 1 value is
+                    masked.
+        """
+        # this function works because sums with masked values return masked results. So if args[3]
+        # is masked then the final result of the comparison will be masked. 
+        return sum(args) is not np.ma.masked
 
 
 class EulerianDiagnostic2D(Diagnostic2D, ABC):
@@ -78,7 +94,7 @@ class EulerianDiagnostic2D(Diagnostic2D, ABC):
             )
 
 
-class LagrangianDiagnostic(Diagnostic2D):
+class LagrangianDiagnostic2D(Diagnostic2D, ABC):
     """ Calculates and stores the flow map for a 2 dimensional flow."""
     def __init__(self) -> None:
         super().__init__()
@@ -141,7 +157,7 @@ class LagrangianDiagnostic(Diagnostic2D):
         return self.flow_map
 
 
-class FTLE(LagrangianDiagnostic):
+class FTLE(LagrangianDiagnostic2D):
     """ Calculates and stores the FTLE field for a 2 dimensional flow."""
     def __init__(self) -> None:
         super().__init__()
@@ -185,9 +201,7 @@ class FTLE(LagrangianDiagnostic):
         for i, j in product(range(self.ydim), range(self.xdim)):
             # Make sure the data is not masked, masked gridpoints do not work with
             # Python's linalg module
-            if (
-                dfxdx[i, j] and dfxdy[i, j] and dfydx[i, j] and dfydy[i, j]
-            ) is not np.ma.masked:
+            if self.not_masked(dfxdx[i, j], dfxdy[i, j], dfydx[i, j], dfydy[i, j]):
                 # Calculate Cauchy-Green tensor, C
                 JF = np.array([[dfxdx[i, j], dfxdy[i, j]], [dfydx[i, j], dfydy[i, j]]])
                 C = np.dot(JF.T, JF)
@@ -251,7 +265,7 @@ class AttractionRate(EulerianDiagnostic2D):
         for i, j in product(range(self.ydim), range(self.xdim)):
             # Make sure the data is not masked, masked gridpoints do not work with
             # Python's linalg module
-            if (dudx[i, j] and dudy[i, j] and dvdx[i, j] and dvdy[i, j]) is not np.ma.masked:
+            if self.not_masked(dudx[i, j], dudy[i, j], dvdx[i, j], dvdy[i, j]):
                 # If the data is not masked, compute s_1 and s_n
                 Gradient = np.array([[dudx[i, j], dudy[i, j]], [dvdx[i, j], dvdy[i, j]]])
                 S = 0.5*(Gradient + np.transpose(Gradient))
@@ -263,7 +277,7 @@ class AttractionRate(EulerianDiagnostic2D):
                 # If the data is masked, then mask the grid point in the output.
                 self.attraction_rate[i, j] = np.ma.masked
                 self.repulsion_rate[i, j] = np.ma.masked
-       return self.attraction_rate, self.repulsion_rate
+        return self.attraction_rate, self.repulsion_rate
 
 
 class Rhodot(EulerianDiagnostic2D):
@@ -311,7 +325,7 @@ class Rhodot(EulerianDiagnostic2D):
         for i, j in product(range(self.ydim), range(self.xdim)):
             # Make sure the data is not masked, masked gridpoints do not work with
             # Python's linalg module
-            if (dudx[i, j] and dudy[i, j] and dvdx[i, j] and dvdy[i, j]) is not np.ma.masked:
+            if self.not_masked(dudx[i, j], dudy[i, j], dvdx[i, j], dvdy[i, j]):
                 # If the data is not masked, compute s_1 and s_n
                 Gradient = np.array([[dudx[i, j], dudy[i, j]], [dvdx[i, j], dvdy[i, j]]])
                 S = 0.5*(Gradient + np.transpose(Gradient))
@@ -333,3 +347,116 @@ class Rhodot(EulerianDiagnostic2D):
                 self.rhodot[i, j] = np.ma.masked
                 self.nudot[i, j] = np.ma.masked
         return self.rhodot, self.nudot
+
+
+class LCS(LagrangianDiagnostic2D):
+    def __init__(self):
+        super().__init__()
+
+    def compute(
+        self, x: np.ndarray[float, ...],
+        y: np.ndarray[float, ...],
+        f: Callable[[float, tuple[float, float]], tuple],
+        t: tuple[float, float],
+        edge_order: int = 1,
+        percentile: float = None,
+        solver: str = 'odeint',
+        **kwargs
+    ) -> np.ndarray[np.ndarray[float, ...], ...]:
+        super().compute(x, y, f, t, solver, **kwargs)
+
+        # Calculate flow map gradients
+        dfxdy, dfxdx = np.gradient(
+            self.flow_map[:, :, 0].squeeze(), self.y, self.x, edge_order=edge_order
+        )
+        dfydy, dfydx = np.gradient(
+            self.flow_map[:, :, 1].squeeze(), self.y, self.x, edge_order=edge_order
+        )
+
+        # flow map is no longer needed and some of the downstream calculations can be quite large
+        # deleting to be more space efficent and allow larger fields.
+        del self.flow_map
+
+        # initialize FTLE and max eigenvector matrices
+        self.ftle = np.ma.empty([self.ydim, self.xdim])
+        Xi_max = np.ma.empty([self.ydim, self.xdim, 2])
+
+        for i, j in product(range(self.ydim), range(self.xdim)):
+            # Make sure the data is not masked, masked gridpoints do not work with
+            # Python's linalg module
+            if self.not_masked(dfxdx[i, j], dfxdy[i, j], dfydx[i, j], dfydy[i, j]):
+                # Calculate Cauchy-Green tensor, C
+                JF = np.array([[dfxdx[i, j], dfxdy[i, j]], [dfydx[i, j], dfydy[i, j]]])
+                C = np.dot(JF.T, JF)
+
+                # Calculate FTLE and directional derivative
+                lambda_max = np.max([0])
+                eigenValues, eigenVectors = np.linalg.eig(C)
+                idx = eigenValues.argsort()
+                lambda_max = eigenValues[idx[-1]]
+                Xi_max[i, j, :] = eigenVectors[:, idx[-1]]
+                if lambda_max >= 1:
+                    self.ftle[i, j] = 1.0 / (2.0*abs(t[-1] - t[0]))*np.log(lambda_max)
+                else:
+                    self.ftle[i, j] = 0
+            else:
+                # If the data is masked, then mask the grid point in the output.
+                self.ftle[i, j] = np.ma.masked
+                Xi_max[i, j, 0] = np.ma.masked
+                Xi_max[i, j, 1] = np.ma.masked
+
+        # derivatives are no longer needed deleting to be more space efficent and allow larger
+        # fields.
+        del dfxdx, dfxdy, dfydx, dfydy
+
+        # Calculate gradients of the ftle field
+        dftledy, dftledx = np.gradient(self.ftle, self.y, self.x, edge_order=edge_order)
+        dftledydy, dftledydx = np.gradient(dftledy, self.y, self.x, edge_order=edge_order)
+        dftledxdy, dftledxdx = np.gradient(dftledx, self.y, self.x, edge_order=edge_order)
+
+        # initialize directional derivative and concavity matrices
+        ftle_directional_derivative = np.ma.empty([self.ydim, self.xdim])
+        ftle_concavity = np.ma.empty([self.ydim, self.xdim])
+
+        for i, j in product(range(self.ydim), range(self.xdim)):
+            # Make sure the data is not masked, masked gridpoints do not work with
+            # Python's linalg module
+
+            if self.not_masked(
+                dftledx[i, j], dftledy[i, j], dftledxdy[i, j],
+                dftledydy[i, j], dftledxdx[i, j], dftledydx[i, j]
+            ):
+                # compute the directional derivative and the concavity
+                ftle_directional_derivative[i, j] = np.dot(
+                    [dftledx[i, j], dftledy[i, j]], Xi_max[i, j, :]
+                )
+                ftle_concavity[i, j] = np.dot(
+                    np.dot(
+                        [
+                            [dftledxdx[i, j], dftledxdy[i, j]],
+                            [dftledydx[i, j], dftledydy[i, j]]
+                        ], Xi_max[i, j, :]
+                    ), Xi_max[i, j, :])
+            else:
+                ftle_directional_derivative[i, j] = np.ma.masked
+                ftle_concavity[i, j] = np.ma.masked
+
+        # import warnings
+        # with warnings.catch_warnings():
+        #     warnings.filterwarnings("ignore", message="divide by zero encountered in divide")
+
+        # mask the directional derivative field where ever the ftle is less than or equal to 0.
+        self.ftle_directional_derivative = np.ma.masked_where(
+            self.ftle <= 0, ftle_directional_derivative
+        )
+        # s1_directional_derivative = np.ma.masked_where(-s1<=np.percentile(-s1,85),s1_directional_derivative)
+
+        # mask the directional derivative field where ever the ftle is concave up.
+        ftle_directional_derivative = np.ma.masked_where(
+            ftle_concavity > 0, ftle_directional_derivative
+        )
+
+        # contours = plt.contour(self.x, self.y, ftle_directional_derivative, levels=[0])
+        # self.LCS = [path.vertices for path in contours.collections[0].get_paths()]
+        # return self.LCS
+        return ftle_directional_derivative
