@@ -1,10 +1,11 @@
-from abc import ABC, abstractmethod
 from typing import Callable
 from itertools import product
+from abc import ABC, abstractmethod
+
 
 import numpy as np
-import scipy.integrate as sint
-
+from scipy.integrate import odeint
+from contourpy import contour_generator
 
 
 class Diagnostic2D(ABC):
@@ -96,8 +97,14 @@ class EulerianDiagnostic2D(Diagnostic2D, ABC):
 
 class LagrangianDiagnostic2D(Diagnostic2D, ABC):
     """ Calculates and stores the flow map for a 2 dimensional flow."""
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        integrator: Callable = lambda f, t, Y, **kwargs: odeint(
+                    f, Y, t, tfirst=True, **kwargs
+                )
+    ) -> None:
         super().__init__()
+        self.integrator = integrator
 
     def compute(
         self,
@@ -105,7 +112,6 @@ class LagrangianDiagnostic2D(Diagnostic2D, ABC):
         y: np.ndarray[float, ...],
         f: Callable[[float, tuple[float, float]], tuple],
         t: tuple[float, float],
-        solver: str = 'odeint',
         **kwargs
     ) -> np.ndarray[np.ndarray[float, ...], ...]:
         """ Computes the flow map for a given vector field.
@@ -118,13 +124,7 @@ class LagrangianDiagnostic2D(Diagnostic2D, ABC):
                     arguments time (scalar) and position (vector), e.g. f(t, Y) where Y contains
                     the x position and the y position [x, y].
                 t (tuple): the time interval over which to calculate trajectories, t0 to tf.
-                solver (string): determines which ode solving function will be used. Options are
-                    'solve_ivp' and 'odeint'. solve_ivp is a more modern ode solver with options
-                    for different methods such as 'LSODA', 'rk45', etc. odeint is an older
-                    implementation that only uses 'LSODA', however it is written in fortran and
-                    significantly faster than solve_ivp. Default is 'odeint'.
-                NOTE: function also accepts kwargs for scipy.integrate.solve_ivp or
-                    scipy.integrate.odeint depending on which solver is selected.
+                NOTE: function also accepts kwargs for for the integrator attribute.
             Returns:
                 flow_map (np.ndarray): The final position of the trajectories.
         """
@@ -137,23 +137,11 @@ class LagrangianDiagnostic2D(Diagnostic2D, ABC):
         self.flow_map = np.empty([self.ydim, self.xdim, 2])
 
         # integrate velocity field
-        if solver == 'solve_ivp':
-            for (i, y0), (j, x0) in product(enumerate(self.y), enumerate(self.x)):
-                sol = sint.solve_ivp(
-                    f, t, (x0, y0), **kwargs
-                )
-                self.flow_map[i, j, :] = sol.y[:, -1]
-        elif solver == 'odeint':
-            for (i, y0), (j, x0) in product(enumerate(self.y), enumerate(self.x)):
-                sol = sint.odeint(
-                    f, (x0, y0), t, tfirst=True, **kwargs
-                )
-                self.flow_map[i, j, :] = sol[-1, :]
-        else:
-            raise ValueError(
-                f'Unknown value "{solver}" for solver argument. Must choose either "solve_ivp" '
-                + 'or "odeint.'
-            )
+        for (i, y0), (j, x0) in product(enumerate(self.y), enumerate(self.x)):
+            self.flow_map[i, j, :] = self.integrator(
+                f, t, (x0, y0), **kwargs
+            )[-1, :]
+
         return self.flow_map
 
 
@@ -349,7 +337,63 @@ class Rhodot(EulerianDiagnostic2D):
         return self.rhodot, self.nudot
 
 
-class LCS(LagrangianDiagnostic2D):
+class RidgeExtractor2D(Diagnostic2D):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def validate_spacing(*args):
+        pass
+
+    def extract_ridges(self, field, Xi, percentile, edge_order):
+        # Calculate gradients of the ftle field
+        dfdy, dfdx = np.gradient(field, self.y, self.x, edge_order=edge_order)
+        dfdydy, dfdydx = np.gradient(dfdy, self.y, self.x, edge_order=edge_order)
+        dfdxdy, dfdxdx = np.gradient(dfdx, self.y, self.x, edge_order=edge_order)
+
+        # initialize directional derivative and concavity matrices
+        directional_derivative = np.ma.empty([self.ydim, self.xdim])
+        concavity = np.ma.empty([self.ydim, self.xdim])
+
+        for i, j in product(range(self.ydim), range(self.xdim)):
+            # Make sure the data is not masked, masked gridpoints do not work with
+            # Python's linalg module
+
+            if self.not_masked(
+                dfdx[i, j], dfdy[i, j], dfdxdy[i, j],
+                dfdydy[i, j], dfdxdx[i, j], dfdydx[i, j]
+            ):
+                # compute the directional derivative and the concavity
+                directional_derivative[i, j] = np.dot(
+                    [dfdx[i, j], dfdy[i, j]], Xi[i, j, :]
+                )
+                concavity[i, j] = np.dot(
+                    np.dot(
+                        [
+                            [dfdxdx[i, j], dfdxdy[i, j]],
+                            [dfdydx[i, j], dfdydy[i, j]]
+                        ], Xi[i, j, :]
+                    ), Xi[i, j, :])
+            else:
+                directional_derivative[i, j] = np.ma.masked
+                concavity[i, j] = np.ma.masked
+
+        directional_derivative = np.ma.masked_where(
+            field <= 0, directional_derivative
+        )
+
+        directional_derivative = np.ma.masked_where(
+            field <= np.percentile(field, percentile), directional_derivative
+        )
+
+        # mask the directional derivative field where ever the f is concave up.
+        directional_derivative = np.ma.masked_where(
+            concavity > 0, directional_derivative
+        )
+
+        return contour_generator(x=self.x, y=self.y, z=directional_derivative).lines(0)
+
+
+class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
     def __init__(self):
         super().__init__()
 
@@ -360,10 +404,9 @@ class LCS(LagrangianDiagnostic2D):
         t: tuple[float, float],
         edge_order: int = 1,
         percentile: float = None,
-        solver: str = 'odeint',
         **kwargs
     ) -> np.ndarray[np.ndarray[float, ...], ...]:
-        super().compute(x, y, f, t, solver, **kwargs)
+        super().compute(x, y, f, t, **kwargs)
 
         # Calculate flow map gradients
         dfxdy, dfxdx = np.gradient(
@@ -408,55 +451,5 @@ class LCS(LagrangianDiagnostic2D):
         # derivatives are no longer needed deleting to be more space efficent and allow larger
         # fields.
         del dfxdx, dfxdy, dfydx, dfydy
-
-        # Calculate gradients of the ftle field
-        dftledy, dftledx = np.gradient(self.ftle, self.y, self.x, edge_order=edge_order)
-        dftledydy, dftledydx = np.gradient(dftledy, self.y, self.x, edge_order=edge_order)
-        dftledxdy, dftledxdx = np.gradient(dftledx, self.y, self.x, edge_order=edge_order)
-
-        # initialize directional derivative and concavity matrices
-        ftle_directional_derivative = np.ma.empty([self.ydim, self.xdim])
-        ftle_concavity = np.ma.empty([self.ydim, self.xdim])
-
-        for i, j in product(range(self.ydim), range(self.xdim)):
-            # Make sure the data is not masked, masked gridpoints do not work with
-            # Python's linalg module
-
-            if self.not_masked(
-                dftledx[i, j], dftledy[i, j], dftledxdy[i, j],
-                dftledydy[i, j], dftledxdx[i, j], dftledydx[i, j]
-            ):
-                # compute the directional derivative and the concavity
-                ftle_directional_derivative[i, j] = np.dot(
-                    [dftledx[i, j], dftledy[i, j]], Xi_max[i, j, :]
-                )
-                ftle_concavity[i, j] = np.dot(
-                    np.dot(
-                        [
-                            [dftledxdx[i, j], dftledxdy[i, j]],
-                            [dftledydx[i, j], dftledydy[i, j]]
-                        ], Xi_max[i, j, :]
-                    ), Xi_max[i, j, :])
-            else:
-                ftle_directional_derivative[i, j] = np.ma.masked
-                ftle_concavity[i, j] = np.ma.masked
-
-        # import warnings
-        # with warnings.catch_warnings():
-        #     warnings.filterwarnings("ignore", message="divide by zero encountered in divide")
-
-        # mask the directional derivative field where ever the ftle is less than or equal to 0.
-        self.ftle_directional_derivative = np.ma.masked_where(
-            self.ftle <= 0, ftle_directional_derivative
-        )
-        # s1_directional_derivative = np.ma.masked_where(-s1<=np.percentile(-s1,85),s1_directional_derivative)
-
-        # mask the directional derivative field where ever the ftle is concave up.
-        ftle_directional_derivative = np.ma.masked_where(
-            ftle_concavity > 0, ftle_directional_derivative
-        )
-
-        # contours = plt.contour(self.x, self.y, ftle_directional_derivative, levels=[0])
-        # self.LCS = [path.vertices for path in contours.collections[0].get_paths()]
-        # return self.LCS
-        return ftle_directional_derivative
+        self.lcs = self.extract_ridges(self.ftle, Xi_max, percentile, edge_order)
+        return self.lcs

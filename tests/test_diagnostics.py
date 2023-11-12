@@ -6,14 +6,6 @@ from dynlab.flows import double_gyre
 def test_ftle():
     x = [0, 1, 2]
     y = [0, 1]
-    expected_ftle = np.array([
-        [0.0393375, 0.16070587, 0.00000000],
-        [0.0000000, 0.16070587, 0.22620488]
-    ])
-    assert np.allclose(
-        expected_ftle,
-        FTLE().compute(x, y, double_gyre, (2, 0), solver='solve_ivp')
-    )
 
     expected_ftle = np.array([
         [0.04001625, 0.16099239, 0.000000],
@@ -21,7 +13,7 @@ def test_ftle():
     ])
     assert np.allclose(
         expected_ftle,
-        FTLE().compute(x, y, double_gyre, (2, 0), solver='odeint')
+        FTLE().compute(x, y, double_gyre, (2, 0))
     )
 
 
