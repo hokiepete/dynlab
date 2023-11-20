@@ -13,7 +13,7 @@ def test_ftle():
     ])
     assert np.allclose(
         expected_ftle,
-        FTLE().compute(x, y, double_gyre, (2, 0))
+        FTLE(num_threads=1).compute(x, y, double_gyre, (2, 0))
     )
 
 

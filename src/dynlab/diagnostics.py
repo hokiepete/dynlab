@@ -2,14 +2,33 @@ from typing import Callable
 from itertools import product
 from abc import ABC, abstractmethod
 
-
 import numpy as np
 from scipy.integrate import odeint
 from contourpy import contour_generator
+from pathos.multiprocessing import ProcessingPool as Pool
+
+def odeint_wrapper(f, t, Y, **kwargs):
+    return odeint(
+        f, Y, t, tfirst=True, **kwargs
+    )
 
 
 class Diagnostic2D(ABC):
     """ Diagnostic base class for 2D flows."""
+    def __init__(self, num_threads=1) -> None:
+        super().__init__()
+        self.num_threads = num_threads
+        if num_threads == 1:
+            self.map = map
+        elif num_threads > 1:
+            def pool_wrapper(f, data):
+                with Pool(num_threads) as p:
+                    result = p.map(f, data)
+                return result
+            self.map = pool_wrapper
+        else:
+            raise ValueError("num_threads must be an integer greater than 0.")
+
     @abstractmethod
     def compute(self, x: np.ndarray[float, ...], y: np.ndarray[float, ...]) -> None:
         """ base 2D compute function. Ensures that x and y are np.array that they have the proper
@@ -99,11 +118,10 @@ class LagrangianDiagnostic2D(Diagnostic2D, ABC):
     """ Calculates and stores the flow map for a 2 dimensional flow."""
     def __init__(
         self,
-        integrator: Callable = lambda f, t, Y, **kwargs: odeint(
-                    f, Y, t, tfirst=True, **kwargs
-                )
+        integrator: Callable = odeint_wrapper,
+        num_threads: int = 1
     ) -> None:
-        super().__init__()
+        super().__init__(num_threads)
         self.integrator = integrator
 
     def compute(
@@ -133,22 +151,25 @@ class LagrangianDiagnostic2D(Diagnostic2D, ABC):
         if len(t) != 2:
             raise ValueError("t must only have 2 values, t_0 and t_final")
 
-        # initialize flow map
-        self.flow_map = np.empty([self.ydim, self.xdim, 2])
+        # calculate the flow map
+        self.flow_map = np.array(list(
+            self.map(
+                lambda initial_values: self.integrator(
+                    f, t, initial_values[::-1], **kwargs
+                )[-1, :],
+                product(self.y, self.x)
+            )
+        ))
 
-        # integrate velocity field
-        for (i, y0), (j, x0) in product(enumerate(self.y), enumerate(self.x)):
-            self.flow_map[i, j, :] = self.integrator(
-                f, t, (x0, y0), **kwargs
-            )[-1, :]
+        self.flow_map = self.flow_map.reshape([self.ydim, self.xdim, 2])
 
         return self.flow_map
 
 
 class FTLE(LagrangianDiagnostic2D):
     """ Calculates and stores the FTLE field for a 2 dimensional flow."""
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, integrator: Callable = odeint_wrapper, num_threads=1) -> None:
+        super().__init__(integrator, num_threads)
 
     def compute(
         self,
@@ -453,3 +474,4 @@ class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
         del dfxdx, dfxdy, dfydx, dfydy
         self.lcs = self.extract_ridges(self.ftle, Xi_max, percentile, edge_order)
         return self.lcs
+
