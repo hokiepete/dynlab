@@ -15,7 +15,7 @@ def odeint_wrapper(f, t, Y, **kwargs):
 
 class Diagnostic2D(ABC):
     """ Diagnostic base class for 2D flows."""
-    def __init__(self, num_threads=1) -> None:
+    def __init__(self, num_threads: int = 1) -> None:
         super().__init__()
         self.num_threads = num_threads
         if num_threads == 1:
@@ -150,7 +150,6 @@ class LagrangianDiagnostic2D(Diagnostic2D, ABC):
 
         if len(t) != 2:
             raise ValueError("t must only have 2 values, t_0 and t_final")
-
         # calculate the flow map
         self.flow_map = np.array(list(
             self.map(
@@ -168,8 +167,8 @@ class LagrangianDiagnostic2D(Diagnostic2D, ABC):
 
 class FTLE(LagrangianDiagnostic2D):
     """ Calculates and stores the FTLE field for a 2 dimensional flow."""
-    def __init__(self, integrator: Callable = odeint_wrapper, num_threads=1) -> None:
-        super().__init__(integrator, num_threads)
+    def __init__(self, integrator: Callable = odeint_wrapper, num_threads: int = 1) -> None:
+        super().__init__(integrator=integrator, num_threads=num_threads)
 
     def compute(
         self,
@@ -357,13 +356,10 @@ class Rhodot(EulerianDiagnostic2D):
                 self.nudot[i, j] = np.ma.masked
         return self.rhodot, self.nudot
 
-
-class RidgeExtractor2D(Diagnostic2D):
-    def __init__(self) -> None:
+import warnings
+class RidgeExtractor2D(Diagnostic2D, ABC):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__()
-
-    def validate_spacing(*args):
-        pass
 
     def extract_ridges(self, field, Xi, percentile, edge_order):
         # Calculate gradients of the ftle field
@@ -402,24 +398,30 @@ class RidgeExtractor2D(Diagnostic2D):
             field <= 0, directional_derivative
         )
 
-        directional_derivative = np.ma.masked_where(
-            field <= np.percentile(field, percentile), directional_derivative
-        )
-
         # mask the directional derivative field where ever the f is concave up.
         directional_derivative = np.ma.masked_where(
             concavity > 0, directional_derivative
         )
 
+        if percentile:
+            # there's a warning here about it using the masked field, which is useless because
+            # that's exactly what we want it to do, so we suppress this warning so as to not
+            # confuse the user. Warnings after this block will still apear.
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                directional_derivative = np.ma.masked_where(
+                    field <= np.percentile(field, percentile), directional_derivative
+                )
         return contour_generator(x=self.x, y=self.y, z=directional_derivative).lines(0)
 
 
 class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
-    def __init__(self):
-        super().__init__()
+    def __init__(self,  integrator: Callable = odeint_wrapper, num_threads: int = 1) -> None:
+        super().__init__(integrator=integrator, num_threads=num_threads)
 
     def compute(
-        self, x: np.ndarray[float, ...],
+        self,
+        x: np.ndarray[float, ...],
         y: np.ndarray[float, ...],
         f: Callable[[float, tuple[float, float]], tuple],
         t: tuple[float, float],
@@ -474,4 +476,63 @@ class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
         del dfxdx, dfxdy, dfydx, dfydy
         self.lcs = self.extract_ridges(self.ftle, Xi_max, percentile, edge_order)
         return self.lcs
+
+class iLES(EulerianDiagnostic2D, RidgeExtractor2D):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def compute(
+        self,
+        x: np.ndarray[float, ...],
+        y: np.ndarray[float, ...],
+        u: np.ndarray[np.ndarray[float, ...], ...] = None,
+        v: np.ndarray[np.ndarray[float, ...], ...] = None,
+        f: Callable[[float, tuple[float, float]], tuple] = None,
+        t: tuple[float, float] = None,
+        type: str = 'attacting',
+        edge_order: int = 1,
+        percentile: float = None
+    ) -> np.ndarray[np.ndarray[float, ...], ...]:
+        if type.lower() == 'attracting':
+            eig_i = 0
+        elif type.lower() == ' repelling':
+            eig_i = -1
+        else:
+            raise ValueError(
+                f'type: {type}, unrecognized, please use either "attracting" or "repelling"'
+            )
+        super().compute(x, y, u, v, f, t)
+
+        # Calculate the gradients of the velocity field
+        dudy, dudx = np.gradient(self.u, self.y, self.x, edge_order=edge_order)
+        dvdy, dvdx = np.gradient(self.v, self.y, self.x, edge_order=edge_order)
+
+        # Initialize arrays for the attraction rate and repullsion rate
+        # Using masked arrays can be very useful when dealing with geophysical data and
+        # data with gaps in it.
+        self.rate_field = np.ma.empty([self.ydim, self.xdim])
+        Xi_max = np.ma.empty([self.ydim, self.xdim, 2])
+
+        for i, j in product(range(self.ydim), range(self.xdim)):
+            # Make sure the data is not masked, masked gridpoints do not work with
+            # Python's linalg module
+            if self.not_masked(dudx[i, j], dudy[i, j], dvdx[i, j], dvdy[i, j]):
+                # If the data is not masked, compute s_1 and s_n
+                Gradient = np.array([[dudx[i, j], dudy[i, j]], [dvdx[i, j], dvdy[i, j]]])
+                S = 0.5*(Gradient + np.transpose(Gradient))
+                eigenValues, eigenVectors = np.linalg.eig(S)
+                idx = eigenValues.argsort()
+                self.rate_field[i, j] = eigenValues[idx[eig_i]]
+                Xi_max[i, j, :] = eigenVectors[:, idx[eig_i]]
+
+            else:
+                # If the data is masked, then mask the grid point in the output.
+                self.rate_field[i, j] = np.ma.masked
+                Xi_max[i, j, 0] = np.ma.masked
+                Xi_max[i, j, 1] = np.ma.masked
+        # derivatives are no longer needed deleting to be more space efficent and allow larger
+        # fields.
+        del dudx, dudy, dvdx, dvdy
+        self.iles = self.extract_ridges(self.rate_field, Xi_max, percentile, edge_order)
+        return self.iles
 
