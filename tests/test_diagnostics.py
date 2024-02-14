@@ -1,5 +1,5 @@
 import numpy as np
-from dynlab.diagnostics import FTLE, AttractionRate, Rhodot
+from dynlab.diagnostics import FTLE, AttractionRate, Rhodot, iLES
 from dynlab.flows import double_gyre
 
 
@@ -87,3 +87,44 @@ def test_rhodot_with_velocity():
     rhodot, nudot = Rhodot().compute(x, y, u=u, v=v)
     assert np.allclose(expected_rhodot, rhodot)
     assert np.allclose(expected_nudot, nudot)
+
+
+def test_iles():
+    expected_attracting = [
+        np.array([
+            [0.00000000, 0.05593946],
+            [0.03594183, 0.00000000]]),
+        np.array([
+            [2.00000000, 0.05593946],
+            [1.96405817, 0.00000000]]),
+        np.array([
+            [1.00000000, 1.00000000],
+            [1.00000000, 0.88888889],
+            [1.00000000, 0.77777778],
+            [1.00000000, 0.66666667],
+            [1.00000000, 0.55555556]
+        ])
+    ]
+    expected_repelling = [
+        np.array([
+            [0.00000000, 0.03799861],
+            [0.05295883, 0.00000000]]),
+        np.array([
+            [1.00000000, 0.00000000],
+            [1.00000000, 0.11111111],
+            [1.00000000, 0.22222222],
+            [1.00000000, 0.33333333],
+            [1.00000000, 0.44444444]]),
+        np.array([
+            [1.94704117, 0.00000000],
+            [2.00000000, 0.03799861]
+        ])
+    ]
+    x = np.linspace(0, 2, 20)
+    y = np.linspace(0, 1, 10)
+
+    attracting_iles = iLES().compute(x, y, f=double_gyre, t=0, kind='attracting')
+    repelling_iles = iLES().compute(x, y, f=double_gyre, t=0, kind='repelling')
+
+    assert all([np.isclose(x, y).all() for x, y in zip(expected_attracting, attracting_iles)])
+    assert all([np.isclose(x, y).all() for x, y in zip(expected_repelling, repelling_iles)])
