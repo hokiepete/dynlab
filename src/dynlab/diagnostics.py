@@ -1,3 +1,4 @@
+import warnings
 from typing import Callable
 from itertools import product
 from abc import ABC, abstractmethod
@@ -6,6 +7,7 @@ import numpy as np
 from scipy.integrate import odeint
 from contourpy import contour_generator
 from pathos.multiprocessing import ProcessingPool as Pool
+
 
 def odeint_wrapper(f, t, Y, **kwargs):
     return odeint(
@@ -356,20 +358,29 @@ class Rhodot(EulerianDiagnostic2D):
                 self.nudot[i, j] = np.ma.masked
         return self.rhodot, self.nudot
 
-import warnings
+
 class RidgeExtractor2D(Diagnostic2D, ABC):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
 
-    def extract_ridges(self, field, Xi, percentile, edge_order):
+    def extract_ridges(self, field, Xi, percentile, edge_order, debug=False):
+        warnings.warn(
+            "Numpy's eigenvector algorithm returns unique eigenvectors up to their sign, i.e. "
+            "Eigenvector[0]=Xi_0. Eigenvector[1]=-Xi_1. This sudden change of sign in the "
+            "eigenvector field can lead to a sudden change of sign in the directional derivative "
+            "field and thus the detection of numerical artifactions as coherent structures. If you "
+            "have doubts or concerns about your resutls set debug=True and you can examine the "
+            "Xi_max, directional_derivative, and concavity attributes to determine if the "
+            "strutures are numerical artifacts or not."
+        )
         # Calculate gradients of the ftle field
         dfdy, dfdx = np.gradient(field, self.y, self.x, edge_order=edge_order)
         dfdydy, dfdydx = np.gradient(dfdy, self.y, self.x, edge_order=edge_order)
         dfdxdy, dfdxdx = np.gradient(dfdx, self.y, self.x, edge_order=edge_order)
 
         # initialize directional derivative and concavity matrices
-        directional_derivative = np.ma.empty([self.ydim, self.xdim])
-        concavity = np.ma.empty([self.ydim, self.xdim])
+        self.directional_derivative = np.ma.empty([self.ydim, self.xdim])
+        self.concavity = np.ma.empty([self.ydim, self.xdim])
 
         for i, j in product(range(self.ydim), range(self.xdim)):
             # Make sure the data is not masked, masked gridpoints do not work with
@@ -380,10 +391,10 @@ class RidgeExtractor2D(Diagnostic2D, ABC):
                 dfdydy[i, j], dfdxdx[i, j], dfdydx[i, j]
             ):
                 # compute the directional derivative and the concavity
-                directional_derivative[i, j] = np.dot(
+                self.directional_derivative[i, j] = np.dot(
                     [dfdx[i, j], dfdy[i, j]], Xi[i, j, :]
                 )
-                concavity[i, j] = np.dot(
+                self.concavity[i, j] = np.dot(
                     np.dot(
                         [
                             [dfdxdx[i, j], dfdxdy[i, j]],
@@ -391,16 +402,16 @@ class RidgeExtractor2D(Diagnostic2D, ABC):
                         ], Xi[i, j, :]
                     ), Xi[i, j, :])
             else:
-                directional_derivative[i, j] = np.ma.masked
-                concavity[i, j] = np.ma.masked
+                self.directional_derivative[i, j] = np.ma.masked
+                self.concavity[i, j] = np.ma.masked
 
-        directional_derivative = np.ma.masked_where(
-            field <= 0, directional_derivative
+        self.directional_derivative = np.ma.masked_where(
+            field <= 0, self.directional_derivative
         )
 
         # mask the directional derivative field where ever the f is concave up.
-        directional_derivative = np.ma.masked_where(
-            concavity > 0, directional_derivative
+        self.directional_derivative = np.ma.masked_where(
+            self.concavity >= 0, self.directional_derivative
         )
 
         if percentile:
@@ -409,10 +420,18 @@ class RidgeExtractor2D(Diagnostic2D, ABC):
             # confuse the user. Warnings after this block will still apear.
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
-                directional_derivative = np.ma.masked_where(
-                    field <= np.percentile(field, percentile), directional_derivative
+                self.directional_derivative = np.ma.masked_where(
+                    field <= np.percentile(field, percentile), self.directional_derivative
                 )
-        return contour_generator(x=self.x, y=self.y, z=directional_derivative).lines(0)
+
+        ridge_lines = contour_generator(x=self.x, y=self.y, z=self.directional_derivative).lines(0)
+
+        # free up some extra memory if not needed
+        if not debug:
+            del self.directional_derivative
+            del self.concavity
+
+        return ridge_lines
 
 
 class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
@@ -427,6 +446,7 @@ class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
         t: tuple[float, float],
         edge_order: int = 1,
         percentile: float = None,
+        debug: bool = False,
         **kwargs
     ) -> np.ndarray[np.ndarray[float, ...], ...]:
         super().compute(x, y, f, t, **kwargs)
@@ -445,7 +465,7 @@ class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
 
         # initialize FTLE and max eigenvector matrices
         self.ftle = np.ma.empty([self.ydim, self.xdim])
-        Xi_max = np.ma.empty([self.ydim, self.xdim, 2])
+        self.Xi_max = np.ma.empty([self.ydim, self.xdim, 2])
 
         for i, j in product(range(self.ydim), range(self.xdim)):
             # Make sure the data is not masked, masked gridpoints do not work with
@@ -460,7 +480,7 @@ class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
                 eigenValues, eigenVectors = np.linalg.eig(C)
                 idx = eigenValues.argsort()
                 lambda_max = eigenValues[idx[-1]]
-                Xi_max[i, j, :] = eigenVectors[:, idx[-1]]
+                self.Xi_max[i, j, :] = eigenVectors[:, idx[-1]]
                 if lambda_max >= 1:
                     self.ftle[i, j] = 1.0 / (2.0*abs(t[-1] - t[0]))*np.log(lambda_max)
                 else:
@@ -468,14 +488,20 @@ class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
             else:
                 # If the data is masked, then mask the grid point in the output.
                 self.ftle[i, j] = np.ma.masked
-                Xi_max[i, j, 0] = np.ma.masked
-                Xi_max[i, j, 1] = np.ma.masked
+                self.Xi_max[i, j, 0] = np.ma.masked
+                self.Xi_max[i, j, 1] = np.ma.masked
 
         # derivatives are no longer needed deleting to be more space efficent and allow larger
         # fields.
         del dfxdx, dfxdy, dfydx, dfydy
-        self.lcs = self.extract_ridges(self.ftle, Xi_max, percentile, edge_order)
+        self.lcs = self.extract_ridges(self.ftle, self.Xi_max, percentile, edge_order, debug)
+
+        # free up some extra memory if not needed
+        if not debug:
+            del self.Xi_max
+
         return self.lcs
+
 
 class iLES(EulerianDiagnostic2D, RidgeExtractor2D):
     def __init__(self) -> None:
@@ -489,17 +515,18 @@ class iLES(EulerianDiagnostic2D, RidgeExtractor2D):
         v: np.ndarray[np.ndarray[float, ...], ...] = None,
         f: Callable[[float, tuple[float, float]], tuple] = None,
         t: tuple[float, float] = None,
-        type: str = 'attacting',
+        kind: str = 'attacting',
         edge_order: int = 1,
-        percentile: float = None
+        percentile: float = None,
+        debug: bool = False
     ) -> np.ndarray[np.ndarray[float, ...], ...]:
-        if type.lower() == 'attracting':
+        if kind.lower() == 'attracting':
             eig_i = 0
-        elif type.lower() == ' repelling':
+        elif kind.lower() == 'repelling':
             eig_i = -1
         else:
             raise ValueError(
-                f'type: {type}, unrecognized, please use either "attracting" or "repelling"'
+                f'kind: {kind}, unrecognized, please use either "attracting" or "repelling"'
             )
         super().compute(x, y, u, v, f, t)
 
@@ -511,7 +538,7 @@ class iLES(EulerianDiagnostic2D, RidgeExtractor2D):
         # Using masked arrays can be very useful when dealing with geophysical data and
         # data with gaps in it.
         self.rate_field = np.ma.empty([self.ydim, self.xdim])
-        Xi_max = np.ma.empty([self.ydim, self.xdim, 2])
+        self.Xi_max = np.ma.empty([self.ydim, self.xdim, 2])
 
         for i, j in product(range(self.ydim), range(self.xdim)):
             # Make sure the data is not masked, masked gridpoints do not work with
@@ -523,16 +550,23 @@ class iLES(EulerianDiagnostic2D, RidgeExtractor2D):
                 eigenValues, eigenVectors = np.linalg.eig(S)
                 idx = eigenValues.argsort()
                 self.rate_field[i, j] = eigenValues[idx[eig_i]]
-                Xi_max[i, j, :] = eigenVectors[:, idx[eig_i]]
+                self.Xi_max[i, j, :] = eigenVectors[:, idx[eig_i]]
 
             else:
                 # If the data is masked, then mask the grid point in the output.
                 self.rate_field[i, j] = np.ma.masked
-                Xi_max[i, j, 0] = np.ma.masked
-                Xi_max[i, j, 1] = np.ma.masked
+                self.Xi_max[i, j, 0] = np.ma.masked
+                self.Xi_max[i, j, 1] = np.ma.masked
+
+        if kind == 'attracting':
+            self.rate_field = -self.rate_field
+
         # derivatives are no longer needed deleting to be more space efficent and allow larger
         # fields.
         del dudx, dudy, dvdx, dvdy
-        self.iles = self.extract_ridges(self.rate_field, Xi_max, percentile, edge_order)
-        return self.iles
+        self.iles = self.extract_ridges(self.rate_field, self.Xi_max, percentile, edge_order, debug)
 
+        # free up some extra memory if not needed
+        if not debug:
+            self.Xi_max
+        return self.iles
