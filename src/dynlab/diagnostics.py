@@ -4,15 +4,10 @@ from itertools import product
 from abc import ABC, abstractmethod
 
 import numpy as np
-from scipy.integrate import odeint
 from contourpy import contour_generator
 from pathos.multiprocessing import ProcessingPool as Pool
 
-
-def odeint_wrapper(f, t, Y, **kwargs):
-    return odeint(
-        f, Y, t, tfirst=True, **kwargs
-    )
+from dynlab.utils import odeint_wrapper, force_eigenvectors2D
 
 
 class Diagnostic2D(ABC):
@@ -446,6 +441,7 @@ class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
         t: tuple[float, float],
         edge_order: int = 1,
         percentile: float = None,
+        force_eigenvectors: bool = False,
         debug: bool = False,
         **kwargs
     ) -> np.ndarray[np.ndarray[float, ...], ...]:
@@ -494,6 +490,10 @@ class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
         # derivatives are no longer needed deleting to be more space efficent and allow larger
         # fields.
         del dfxdx, dfxdy, dfydx, dfydy
+
+        if force_eigenvectors:
+            self.Xi_max = force_eigenvectors2D(self.Xi_max)
+
         self.lcs = self.extract_ridges(self.ftle, self.Xi_max, percentile, edge_order, debug)
 
         # free up some extra memory if not needed
@@ -518,6 +518,7 @@ class iLES(EulerianDiagnostic2D, RidgeExtractor2D):
         kind: str = 'attacting',
         edge_order: int = 1,
         percentile: float = None,
+        force_eigenvectors: bool = False,
         debug: bool = False
     ) -> np.ndarray[np.ndarray[float, ...], ...]:
         if kind.lower() == 'attracting':
@@ -558,12 +559,16 @@ class iLES(EulerianDiagnostic2D, RidgeExtractor2D):
                 self.Xi_max[i, j, 0] = np.ma.masked
                 self.Xi_max[i, j, 1] = np.ma.masked
 
-        if kind == 'attracting':
-            self.rate_field = -self.rate_field
-
         # derivatives are no longer needed deleting to be more space efficent and allow larger
         # fields.
         del dudx, dudy, dvdx, dvdy
+
+        if kind == 'attracting':
+            self.rate_field = -self.rate_field
+
+        if force_eigenvectors:
+            self.Xi_max = force_eigenvectors2D(self.Xi_max)
+
         self.iles = self.extract_ridges(self.rate_field, self.Xi_max, percentile, edge_order, debug)
 
         # free up some extra memory if not needed

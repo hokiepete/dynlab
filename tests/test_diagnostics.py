@@ -128,3 +128,32 @@ def test_iles():
 
     assert all([np.isclose(x, y).all() for x, y in zip(expected_attracting, attracting_iles)])
     assert all([np.isclose(x, y).all() for x, y in zip(expected_repelling, repelling_iles)])
+
+
+def test_iles_with_forced_eigenvectors():
+    expected_attracting = [np.array([
+        [1.00000000, 0.55555556],
+        [1.00000000, 0.66666667],
+        [1.00000000, 0.77777778],
+        [1.00000000, 0.88888889],
+        [1.00000000, 1.00000000]
+    ])]
+    expected_repelling = [np.array([
+        [1.00000000, 0.00000000],
+        [1.00000000, 0.11111111],
+        [1.00000000, 0.22222222],
+        [1.00000000, 0.33333333],
+        [1.00000000, 0.44444444]
+    ])]
+    x = np.linspace(0, 2, 20)
+    y = np.linspace(0, 1, 10)
+
+    attracting_iles = iLES().compute(
+        x, y, f=double_gyre, t=0, kind='attracting', force_eigenvectors=True
+    )
+    repelling_iles = iLES().compute(
+        x, y, f=double_gyre, t=0, kind='repelling', force_eigenvectors=True
+    )
+
+    assert all([np.isclose(x, y).all() for x, y in zip(expected_attracting, attracting_iles)])
+    assert all([np.isclose(x, y).all() for x, y in zip(expected_repelling, repelling_iles)])
