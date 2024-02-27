@@ -1,19 +1,11 @@
 import numpy as np
-from dynlab.diagnostics import FTLE, AttractionRate, Rhodot
+from dynlab.diagnostics import FTLE, AttractionRate, Rhodot, iLES, LCS
 from dynlab.flows import double_gyre
 
 
 def test_ftle():
     x = [0, 1, 2]
     y = [0, 1]
-    expected_ftle = np.array([
-        [0.0393375, 0.16070587, 0.00000000],
-        [0.0000000, 0.16070587, 0.22620488]
-    ])
-    assert np.allclose(
-        expected_ftle,
-        FTLE().compute(x, y, double_gyre, (2, 0), solver='solve_ivp')
-    )
 
     expected_ftle = np.array([
         [0.04001625, 0.16099239, 0.000000],
@@ -21,7 +13,7 @@ def test_ftle():
     ])
     assert np.allclose(
         expected_ftle,
-        FTLE().compute(x, y, double_gyre, (2, 0), solver='odeint')
+        FTLE(num_threads=1).compute(x, y, double_gyre, (2, 0))
     )
 
 
@@ -95,3 +87,100 @@ def test_rhodot_with_velocity():
     rhodot, nudot = Rhodot().compute(x, y, u=u, v=v)
     assert np.allclose(expected_rhodot, rhodot)
     assert np.allclose(expected_nudot, nudot)
+
+
+def test_iles():
+    expected_attracting = [
+        np.array([
+            [0.00000000, 0.05593946],
+            [0.03594183, 0.00000000]]),
+        np.array([
+            [2.00000000, 0.05593946],
+            [1.96405817, 0.00000000]]),
+        np.array([
+            [1.00000000, 1.00000000],
+            [1.00000000, 0.88888889],
+            [1.00000000, 0.77777778],
+            [1.00000000, 0.66666667],
+            [1.00000000, 0.55555556]
+        ])
+    ]
+    expected_repelling = [
+        np.array([
+            [0.00000000, 0.03799861],
+            [0.05295883, 0.00000000]]),
+        np.array([
+            [1.00000000, 0.00000000],
+            [1.00000000, 0.11111111],
+            [1.00000000, 0.22222222],
+            [1.00000000, 0.33333333],
+            [1.00000000, 0.44444444]]),
+        np.array([
+            [1.94704117, 0.00000000],
+            [2.00000000, 0.03799861]
+        ])
+    ]
+    x = np.linspace(0, 2, 20)
+    y = np.linspace(0, 1, 10)
+
+    attracting_iles = iLES().compute(x, y, f=double_gyre, t=0, kind='attracting')
+    repelling_iles = iLES().compute(x, y, f=double_gyre, t=0, kind='repelling')
+
+    assert all([np.isclose(x, y).all() for x, y in zip(expected_attracting, attracting_iles)])
+    assert all([np.isclose(x, y).all() for x, y in zip(expected_repelling, repelling_iles)])
+
+
+def test_iles_with_forced_eigenvectors():
+    expected_attracting = [np.array([
+        [1.00000000, 0.55555556],
+        [1.00000000, 0.66666667],
+        [1.00000000, 0.77777778],
+        [1.00000000, 0.88888889],
+        [1.00000000, 1.00000000]
+    ])]
+    expected_repelling = [np.array([
+        [1.00000000, 0.00000000],
+        [1.00000000, 0.11111111],
+        [1.00000000, 0.22222222],
+        [1.00000000, 0.33333333],
+        [1.00000000, 0.44444444]
+    ])]
+    x = np.linspace(0, 2, 20)
+    y = np.linspace(0, 1, 10)
+
+    attracting_iles = iLES().compute(
+        x, y, f=double_gyre, t=0, kind='attracting', force_eigenvectors=True
+    )
+    repelling_iles = iLES().compute(
+        x, y, f=double_gyre, t=0, kind='repelling', force_eigenvectors=True
+    )
+
+    assert all([np.isclose(x, y).all() for x, y in zip(expected_attracting, attracting_iles)])
+    assert all([np.isclose(x, y).all() for x, y in zip(expected_repelling, repelling_iles)])
+
+
+def test_lcs():
+    expected_lcs = [
+        np.array([
+            [1.01249658, 0.55555556],
+            [1.00954249, 0.66666667],
+            [1.00900913, 0.77777778],
+            [1.00888040, 0.88888889],
+            [1.00885959, 1.00000000]
+        ]),
+        np.array([
+            [0.00000000, 0.96183275],
+            [0.05301184, 1.00000000]
+        ]),
+        np.array([
+            [1.94690241, 1.00000000],
+            [2.00000000, 0.96177941]
+        ])
+    ]
+
+    x = np.linspace(0, 2, 20)
+    y = np.linspace(0, 1, 10)
+
+    attracting_lcs = LCS().compute(x, y, f=double_gyre, t=(0.1, 0))
+
+    assert all([np.isclose(x, y).all() for x, y in zip(expected_lcs, attracting_lcs)])
