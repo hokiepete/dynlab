@@ -1,5 +1,5 @@
 import numpy as np
-from dynlab.diagnostics import FTLE, AttractionRate, Rhodot, iLES
+from dynlab.diagnostics import FTLE, AttractionRate, Rhodot, iLES, LCS
 from dynlab.flows import double_gyre
 
 
@@ -157,3 +157,30 @@ def test_iles_with_forced_eigenvectors():
 
     assert all([np.isclose(x, y).all() for x, y in zip(expected_attracting, attracting_iles)])
     assert all([np.isclose(x, y).all() for x, y in zip(expected_repelling, repelling_iles)])
+
+
+def test_lcs():
+    expected_lcs = [
+        np.array([
+            [1.01249658, 0.55555556],
+            [1.00954249, 0.66666667],
+            [1.00900913, 0.77777778],
+            [1.00888040, 0.88888889],
+            [1.00885959, 1.00000000]
+        ]),
+        np.array([
+            [0.00000000, 0.96183275],
+            [0.05301184, 1.00000000]
+        ]),
+        np.array([
+            [1.94690241, 1.00000000],
+            [2.00000000, 0.96177941]
+        ])
+    ]
+
+    x = np.linspace(0, 2, 20)
+    y = np.linspace(0, 1, 10)
+
+    attracting_lcs = LCS().compute(x, y, f=double_gyre, t=(0.1, 0))
+
+    assert all([np.isclose(x, y).all() for x, y in zip(expected_lcs, attracting_lcs)])
