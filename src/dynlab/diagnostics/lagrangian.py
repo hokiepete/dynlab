@@ -1,9 +1,8 @@
+import numpy as np
 from typing import Callable
 from itertools import product
 
-import numpy as np
-
-from dynlab.utils import odeint_wrapper
+from dynlab.utils import odeint_wrapper, force_eigenvectors2D
 from dynlab.diagnostics._base_classes import LagrangianDiagnostic2D, RidgeExtractor2D
 
 
