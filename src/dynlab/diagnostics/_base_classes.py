@@ -11,13 +11,12 @@ from dynlab.utils import odeint_wrapper
 
 
 class Diagnostic2D(ABC):
-    """ Diagnostic base class for 2D flows."""
+    """ Diagnostic base class for 2D flows. """
     def __init__(self, num_threads: int = 1) -> None:
         """ Initializes diagnostic base class, including the setting up of multiprocessing when
                 requested.
             Args:
-                num_threads (int): The number of threads to use for multiprocessing. Defaults to
-                    one.
+                num_threads (int): The number of threads to use for multiprocessing. Defaults to 1.
             Returns:
                 None
         """
@@ -35,7 +34,7 @@ class Diagnostic2D(ABC):
             raise ValueError("num_threads must be an integer greater than 0.")
 
     @abstractmethod
-    def compute(self, x: np.ndarray[float, ...], y: np.ndarray[float, ...]) -> None:
+    def compute(self, x: np.ndarray[float], y: np.ndarray[float]) -> None:
         """ base 2D compute function. Ensures that x and y are np.array that they have the proper
                 length. Also sets class attributes: x, y, xdim, ydim.
             Args:
@@ -73,20 +72,26 @@ class Diagnostic2D(ABC):
 
 
 class EulerianDiagnostic2D(Diagnostic2D, ABC):
-    """ Eulerian diagnostic base class for 2D flows."""
+    """ Eulerian diagnostic base class for 2D flows. """
     @abstractmethod
     def compute(
         self,
-        x: np.ndarray[float, ...],
-        y: np.ndarray[float, ...],
-        u: np.ndarray[np.ndarray[float, ...], ...],
-        v: np.ndarray[np.ndarray[float, ...], ...],
+        x: np.ndarray[float],
+        y: np.ndarray[float],
+        u: np.ndarray[np.ndarray[float]],
+        v: np.ndarray[np.ndarray[float]],
         f: Callable[[float, tuple[float, float]], tuple] = None,
-        t: float = None
-    ) -> None:
+        t: float = None,
+        edge_order: int = 1
+    ) -> tuple[
+        np.ndarray[np.ndarray[float]],
+        np.ndarray[np.ndarray[float]],
+        np.ndarray[np.ndarray[float]],
+        np.ndarray[np.ndarray[float]]
+    ]:
         """ base 2D eulerian compute function. Ensures that u and v are np.array that they have the
-                proper length. Also sets class attributes: u, v. NOTE: checks for x and y are
-                handled by the parent class compute method.
+                proper length. Also sets class attributes: u, v; and calculates the gradients of
+                the velocity fields.
             Args:
                 x (np.ndarray): the x coordinates of the flow.
                 y (np.ndarray): the y coordinates of the flow.
@@ -96,8 +101,12 @@ class EulerianDiagnostic2D(Diagnostic2D, ABC):
                     arguments time (scalar) and position (vector), e.g. f(t, Y) where Y contains
                     the x position and the y position [x, y].
                 t (float): the time step at which f will calculate u and v.
+                edge_order (int): order to use for gradient calculation. Defaults to 1.
             Returns:
-                None
+                dudy (np.ndarray): The partial derivative of u with respect to y
+                dudx (np.ndarray): The partial derivative of u with respect to x
+                dvdy (np.ndarray): The partial derivative of v with respect to y
+                dvdx (np.ndarray): The partial derivative of v with respect to x
         """
         super().compute(x, y)
         if u is not None and v is not None:
@@ -118,9 +127,15 @@ class EulerianDiagnostic2D(Diagnostic2D, ABC):
                 + "calculate a velocity field must be passed to the compute function."
             )
 
+        # Calculate the gradients of the velocity field
+        dudy, dudx = np.gradient(self.u, self.y, self.x, edge_order=edge_order)
+        dvdy, dvdx = np.gradient(self.v, self.y, self.x, edge_order=edge_order)
+
+        return dudy, dudx, dvdy, dvdx
+
 
 class LagrangianDiagnostic2D(Diagnostic2D, ABC):
-    """ Calculates and stores the flow map for a 2 dimensional flow."""
+    """ Lagrangian diagnostic base class for 2D flows. """
     def __init__(
         self,
         integrator: Callable = odeint_wrapper,
@@ -141,12 +156,12 @@ class LagrangianDiagnostic2D(Diagnostic2D, ABC):
     @abstractmethod
     def compute(
         self,
-        x: np.ndarray[float, ...],
-        y: np.ndarray[float, ...],
+        x: np.ndarray[float],
+        y: np.ndarray[float],
         f: Callable[[float, tuple[float, float]], tuple],
         t: tuple[float, float],
         **kwargs
-    ) -> np.ndarray[np.ndarray[float, ...], ...]:
+    ) -> np.ndarray[np.ndarray[float]]:
         """ Computes the flow map for a given vector field.
             Args:
                 x (np.ndarray): 1-d array containing the initial x-coordinates for the
@@ -157,7 +172,7 @@ class LagrangianDiagnostic2D(Diagnostic2D, ABC):
                     arguments time (scalar) and position (vector), e.g. f(t, Y) where Y contains
                     the x position and the y position [x, y].
                 t (tuple): the time interval over which to calculate trajectories, t0 to tf.
-                NOTE: function also accepts kwargs for for the integrator attribute.
+                **kwargs: keyword arguments for the integrator.
             Returns:
                 flow_map (np.ndarray): The final position of the trajectories.
         """
@@ -166,7 +181,7 @@ class LagrangianDiagnostic2D(Diagnostic2D, ABC):
         if len(t) != 2:
             raise ValueError("t must only have 2 values, t_0 and t_final")
         # calculate the flow map
-        self.flow_map = np.array(list(
+        flow_map = np.array(list(
             self.map(
                 lambda initial_values: self.integrator(
                     f, t, initial_values[::-1], **kwargs
@@ -175,17 +190,17 @@ class LagrangianDiagnostic2D(Diagnostic2D, ABC):
             )
         ))
 
-        self.flow_map = self.flow_map.reshape([self.ydim, self.xdim, 2])
+        flow_map = flow_map.reshape([self.ydim, self.xdim, 2])
 
-        return self.flow_map
+        return flow_map
 
 
 class RidgeExtractor2D(Diagnostic2D, ABC):
     """ Encapsulates 2D ridge extraction code. """
     def extract_ridges(
         self,
-        field: np.ndarray[np.ndarray[float, ...], ...],
-        Xi: np.ndarray[np.ndarray[np.ndarray[float, ...], ...], ...],
+        field: np.ndarray[np.ndarray[float]],
+        Xi: np.ndarray[np.ndarray[np.ndarray[float]]],
         percentile: int,
         edge_order: int,
         debug: bool = False
@@ -193,8 +208,16 @@ class RidgeExtractor2D(Diagnostic2D, ABC):
         """ Calculates and extracts ridges perpendicular to the directions of maximum stretching
                 in 2D flows.
             Args:
-                
-        
+                field (np.ndarray): the field in which to find ridges.
+                Xi (np.ndarray): the eigenvector field of the given field.
+                percentile (float): which percentile to filter LCS on, i.e. 90 would filter out
+                    LCS weaker than the 90th percentile. Defaults to None.
+                edge_order (int): order to use for gradient calculation. Defaults to 1.
+                debug (bool): when True algorithm will store the directional derivative field
+                    (directional_derivative) and the concavity field (concavity) to allow users
+                    to dig deeper into the LCS results.
+            Returns:
+                ridge_lines (np.ndarray): collection of ridge coordinates.
         """
         # Calculate gradients of the ftle field
         dfdy, dfdx = np.gradient(field, self.y, self.x, edge_order=edge_order)

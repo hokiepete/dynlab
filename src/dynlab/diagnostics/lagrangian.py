@@ -7,19 +7,23 @@ from dynlab.diagnostics._base_classes import LagrangianDiagnostic2D, RidgeExtrac
 
 
 class FTLE(LagrangianDiagnostic2D):
-    """ Calculates and stores the FTLE field for a 2 dimensional flow."""
+    """ Calculates and stores the FTLE field for a 2 dimensional flow. """
     def __init__(self, integrator: Callable = odeint_wrapper, num_threads: int = 1) -> None:
+        """ Initializes class object.
+            integrator (callable): the integration algorithm to use to calculate trajectories.
+            num_threads (int): the number of threads to process on. Defaults to 1 (single threaded).
+        """
         super().__init__(integrator=integrator, num_threads=num_threads)
 
     def compute(
         self,
-        x: np.ndarray[float, ...],
-        y: np.ndarray[float, ...],
+        x: np.ndarray[float],
+        y: np.ndarray[float],
         f: Callable[[float, tuple[float, float]], tuple],
         t: tuple[float, float],
         edge_order: int = 1,
         **kwargs
-    ) -> np.ndarray[np.ndarray[float, ...], ...]:
+    ) -> np.ndarray[np.ndarray[float]]:
         """ Computes the FTLE field for a given vector field.
             Args:
                 x (np.ndarray): 1-d array containing the x-coordinates of the field.
@@ -28,13 +32,14 @@ class FTLE(LagrangianDiagnostic2D):
                     arguments time (scalar) and position (vector), e.g. f(t, Y) where Y contains
                     the x position and the y position [x, y].
                 t (tuple): the time interval over which to calculate FTLE values, t0 to tf.
-                NOTE: function also accepts kwargs for scipy.integrate.solve_ivp.
+                edge_order (int): order to use for gradient calculation. Defaults to 1.
+                **kwargs: keyword arguments for the integrator.
             Returns:
-                ftle (np.ndarray): The FTLE field for the given flow.
+                field (np.ndarray): The FTLE field for the given flow.
         """
 
         # computes the flow map
-        super().compute(x, y, f, t, **kwargs)
+        self.flow_map = super().compute(x, y, f, t, **kwargs)
 
         # Calculate flow map gradients
         dfxdy, dfxdx = np.gradient(
@@ -45,7 +50,7 @@ class FTLE(LagrangianDiagnostic2D):
         )
 
         # initialize FTLE matrix
-        self.ftle = np.ma.empty([self.ydim, self.xdim])
+        self.field = np.ma.empty([self.ydim, self.xdim])
 
         for i, j in product(range(self.ydim), range(self.xdim)):
             # Make sure the data is not masked, masked gridpoints do not work with
@@ -58,24 +63,28 @@ class FTLE(LagrangianDiagnostic2D):
                 # Calculate FTLE
                 lambda_max = np.max(np.linalg.eig(C)[0])
                 if lambda_max >= 1:
-                    self.ftle[i, j] = 1.0 / (2.0*abs(t[-1] - t[0]))*np.log(lambda_max)
+                    self.field[i, j] = 1.0 / (2.0*abs(t[-1] - t[0]))*np.log(lambda_max)
                 else:
-                    self.ftle[i, j] = 0
+                    self.field[i, j] = 0
             else:
                 # If the data is masked, then mask the grid point in the output.
-                self.ftle[i, j] = np.ma.masked
+                self.field[i, j] = np.ma.masked
 
-        return self.ftle
+        return self.field
 
 
 class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
     def __init__(self,  integrator: Callable = odeint_wrapper, num_threads: int = 1) -> None:
+        """ Initializes class object.
+            integrator (callable): the integration algorithm to use to calculate trajectories.
+            num_threads (int): the number of threads to process on. Defaults to 1 (single threaded).
+        """
         super().__init__(integrator=integrator, num_threads=num_threads)
 
     def compute(
         self,
-        x: np.ndarray[float, ...],
-        y: np.ndarray[float, ...],
+        x: np.ndarray[float],
+        y: np.ndarray[float],
         f: Callable[[float, tuple[float, float]], tuple],
         t: tuple[float, float],
         edge_order: int = 1,
@@ -83,19 +92,29 @@ class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
         force_eigenvectors: bool = False,
         debug: bool = False,
         **kwargs
-    ) -> np.ndarray[np.ndarray[float, ...], ...]:
-        """ 
-            NOTE: Numpy's eigenvector algorithm returns unique eigenvectors up to their sign, i.e.
-            Eigenvector[0]=Xi_0. Eigenvector[1]=-Xi_1. This sudden change of sign in the
-            eigenvector field can lead to a sudden change of sign in the directional derivative
-            field and thus the detection of numerical artifactions as coherent structures. If you
-            have doubts or concerns about your resutls set debug=True and you can examine the
-            Xi_max, directional_derivative, and concavity attributes to determine if the structures
-            are numerical artifacts or not.
-        
-        
+    ) -> np.ndarray[np.ndarray[float]]:
+        """ Computes the LCS for a given vector field.
+            Args:
+                x (np.ndarray): 1-d array containing the x-coordinates of the field.
+                y (np.ndarray): 1-d array containing the y-coordinates of the field.
+                f (function): the vector function from which to calculate the FTLE, f must take 2
+                    arguments time (scalar) and position (vector), e.g. f(t, Y) where Y contains
+                    the x position and the y position [x, y].
+                t (tuple): the time interval over which to calculate LCS values, t0 to tf.
+                edge_order (int): order to use for gradient calculation. Defaults to 1.
+                percentile (float): which percentile to filter LCS on, i.e. 90 would filter out
+                    LCS weaker than the 90th percentile. Defaults to None.
+                force_eigenvectors (bool): np.linalg.eig will product eigenvectors unique up to
+                    their sign. This flag forces eigenvectors to have the same sign. Defaults to
+                    False.
+                debug (bool): when True algorithm will store the eigenvector field (Xi_max), the
+                    directional derivative field (directional_derivative) and the concavity field
+                    (concavity) to allow users to dig deeper into the LCS results.
+                **kwargs: keyword arguments for the integrator.
+            Returns:
+                lcs (np.ndarray): collection of lcs coordinates.
         """
-        super().compute(x, y, f, t, **kwargs)
+        self.flow_map = super().compute(x, y, f, t, **kwargs)
 
         # Calculate flow map gradients
         dfxdy, dfxdx = np.gradient(
