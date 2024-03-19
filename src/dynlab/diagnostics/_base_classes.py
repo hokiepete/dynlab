@@ -12,27 +12,6 @@ from dynlab.utils import odeint_wrapper
 
 class Diagnostic2D(ABC):
     """ Diagnostic base class for 2D flows. """
-    def __init__(self, num_threads: int = 1) -> None:
-        """ Initializes diagnostic base class, including the setting up of multiprocessing when
-                requested.
-            Args:
-                num_threads (int): The number of threads to use for multiprocessing. Defaults to 1.
-            Returns:
-                None
-        """
-        super().__init__()
-        self.num_threads = num_threads
-        if num_threads == 1:
-            self.map = map
-        elif num_threads > 1:
-            def pool_wrapper(f, data):
-                with Pool(num_threads) as p:
-                    result = p.map(f, data)
-                return result
-            self.map = pool_wrapper
-        else:
-            raise ValueError("num_threads must be an integer greater than 0.")
-
     @abstractmethod
     def compute(self, x: np.ndarray[float], y: np.ndarray[float]) -> None:
         """ base 2D compute function. Ensures that x and y are np.array that they have the proper
@@ -141,17 +120,32 @@ class LagrangianDiagnostic2D(Diagnostic2D, ABC):
         integrator: Callable = odeint_wrapper,
         num_threads: int = 1
     ) -> None:
-        """ Initializes lagrangian diagnostic base class.
+        """ Initializes lagrangian diagnostic base class, including the setting up of
+                multiprocessing when requested.
             Args:
                 integrator (Callable): function for integrating velocity fields. Must conform to
                     the syntax f(t, Y), where t is the time-step and Y is the position vector.
                     Defaults to a wrapped verion of scipy's odeint, which itself is a wrapper for
                     LSODA.
+                num_threads (int): The number of threads to use for multiprocessing. Defaults to 1.
             Returns:
                 None
         """
-        super().__init__(num_threads)
+        super().__init__()
+
+        self.num_threads = num_threads
         self.integrator = integrator
+
+        if num_threads == 1:
+            self.map = map
+        elif num_threads > 1:
+            def pool_wrapper(f, data):
+                with Pool(num_threads) as p:
+                    result = p.map(f, data)
+                return result
+            self.map = pool_wrapper
+        else:
+            raise ValueError("num_threads must be an integer greater than 0.")
 
     @abstractmethod
     def compute(

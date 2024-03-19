@@ -63,12 +63,6 @@ class _AttractionRepulsionRate(EulerianDiagnostic2D):
 
 class AttractionRate(_AttractionRepulsionRate):
     """ Computes and stores the attraction rate field for a 2 dimensional flow. """
-    def __init__(self, num_threads: int = 1) -> None:
-        """ Initializes class object.
-            num_threads (int): The number of threads to process on. Defaults to 1 (single threaded).
-        """
-        super().__init__(num_threads)
-
     def compute(
         self,
         x: np.ndarray[float],
@@ -99,12 +93,6 @@ class AttractionRate(_AttractionRepulsionRate):
 
 class RepulsionRate(_AttractionRepulsionRate):
     """ Computes and stores the repulsion rate field for a 2 dimensional flow. """
-    def __init__(self, num_threads: int = 1) -> None:
-        """ Initializes class object.
-            num_threads (int): The number of threads to process on. Defaults to 1 (single threaded).
-        """
-        super().__init__(num_threads)
-
     def compute(
         self,
         x: np.ndarray[float],
@@ -210,12 +198,6 @@ class _TrajectoryRepulsionRateRatio(EulerianDiagnostic2D):
 
 class TrajectoryRepulsionRate(_TrajectoryRepulsionRateRatio):
     """ Computes and stores the trajectory repulsion rate field for a 2 dimensional flow. """
-    def __init__(self, num_threads: int = 1) -> None:
-        """ Initializes class object.
-            num_threads (int): The number of threads to process on. Defaults to 1 (single threaded).
-        """
-        super().__init__(num_threads)
-
     def compute(
         self,
         x: np.ndarray[float],
@@ -246,9 +228,6 @@ class TrajectoryRepulsionRate(_TrajectoryRepulsionRateRatio):
 
 class TrajectoryRepulsionRatio(_TrajectoryRepulsionRateRatio):
     """ Computes and stores the trajectory repulsion ratio field for a 2 dimensional flow. """
-    def __init__(self, num_threads: int = 1) -> None:
-        super().__init__(num_threads)
-
     def compute(
         self,
         x: np.ndarray[float],
@@ -279,9 +258,6 @@ class TrajectoryRepulsionRatio(_TrajectoryRepulsionRateRatio):
 
 class iLES(EulerianDiagnostic2D, RidgeExtractor2D):
     """ Computes and stores the iLES for a 2 dimensional flow. """
-    def __init__(self, num_threads: int = 1) -> None:
-        super().__init__(num_threads)
-
     def compute(
         self,
         x: np.ndarray[float],

@@ -9,9 +9,14 @@ from dynlab.diagnostics._base_classes import LagrangianDiagnostic2D, RidgeExtrac
 class FTLE(LagrangianDiagnostic2D):
     """ Calculates and stores the FTLE field for a 2 dimensional flow. """
     def __init__(self, integrator: Callable = odeint_wrapper, num_threads: int = 1) -> None:
-        """ Initializes class object.
-            integrator (callable): the integration algorithm to use to calculate trajectories.
-            num_threads (int): the number of threads to process on. Defaults to 1 (single threaded).
+        """ Initializes FTLE class object.
+            Args:
+                integrator (Callable): function for integrating velocity fields. Must conform to
+                    the syntax f(t, Y), where t is the time-step and Y is the position vector.
+                    Defaults to a wrapped verion of scipy's odeint, which itself is a wrapper for
+                    LSODA.
+                num_threads (int): the number of threads to process on. Defaults to 1 (single
+                    threaded).
         """
         super().__init__(integrator=integrator, num_threads=num_threads)
 
@@ -75,9 +80,14 @@ class FTLE(LagrangianDiagnostic2D):
 
 class LCS(LagrangianDiagnostic2D, RidgeExtractor2D):
     def __init__(self,  integrator: Callable = odeint_wrapper, num_threads: int = 1) -> None:
-        """ Initializes class object.
-            integrator (callable): the integration algorithm to use to calculate trajectories.
-            num_threads (int): the number of threads to process on. Defaults to 1 (single threaded).
+        """ Initializes LCS class object.
+            Args:
+                integrator (Callable): function for integrating velocity fields. Must conform to
+                    the syntax f(t, Y), where t is the time-step and Y is the position vector.
+                    Defaults to a wrapped verion of scipy's odeint, which itself is a wrapper for
+                    LSODA.
+                num_threads (int): the number of threads to process on. Defaults to 1 (single
+                    threaded).
         """
         super().__init__(integrator=integrator, num_threads=num_threads)
 
