@@ -269,7 +269,7 @@ class iLES(EulerianDiagnostic2D, RidgeExtractor2D):
         kind: str = 'attacting',
         edge_order: int = 1,
         percentile: float = None,
-        force_eigenvectors: bool = False,
+        force_eigenvectors: bool = True,
         debug: bool = False
     ) -> np.ndarray[np.ndarray[float]]:
         """ Computes the LCS for a given vector field.
@@ -289,7 +289,7 @@ class iLES(EulerianDiagnostic2D, RidgeExtractor2D):
                     iLES weaker than the 90th percentile. Defaults to None.
                 force_eigenvectors (bool): np.linalg.eig will product eigenvectors unique up to
                     their sign. This flag forces eigenvectors to have the same sign. Defaults to
-                    False.
+                    True.
                 debug (bool): when True algorithm will store the eigenvector field (Xi_max), the
                     directional derivative field (directional_derivative) and the concavity field
                     (concavity) to allow users to dig deeper into the LCS results.

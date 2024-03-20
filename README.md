@@ -12,10 +12,43 @@ from dynlab.diagnostics import FTLE
 from dynlab.flows import double_gyre
 x = np.linspace(0, 2, 101)
 y = np.linspace(0, 1, 101)
-ftle = FTLE().compute(x, y, double_gyre, (10, 0), edge_order=2, rtol=1e-8, atol=1e-8)
+ftle = FTLE(num_threads=1).compute(x, y, double_gyre, (10, 0), edge_order=2, rtol=1e-8, atol=1e-8)
 plt.pcolormesh(x, y, ftle, shading='gouraud')
 ```
 ![alt text](https://github.com/hokiepete/docs/blob/main/images/double_gyre_ftle.png)
+
+```import numpy as np
+import matplotlib.pyplot as plt
+from dynlab.diagnostics import LCS
+from dynlab.flows import double_gyre
+x = np.linspace(0, 2, 201)
+y = np.linspace(0, 1, 101)
+lcs = LCS()
+attracting_lcs = lcs.compute(x, y, f=double_gyre, t=(10, 0), percentile=80)
+for line in attracting_lcs:
+    plt.plot(line[:, 0],line[:, 1], 'b')
+```
+![alt text](https://github.com/hokiepete/docs/blob/main/images/double_gyre_lcs.png)
+
+```import numpy as np
+import matplotlib.pyplot as plt
+from dynlab.diagnostics import iLES
+from dynlab.flows import double_gyre
+x = np.linspace(0, 2, 201)
+y = np.linspace(0, 1, 101)
+attracting_iles = iLES().compute(x, y, f=double_gyre, t=0, kind='attracting', force_eigenvectors=True)
+repelling_iles = iLES().compute(x, y, f=double_gyre, t=0, kind='repelling', force_eigenvectors=True)
+
+xx, yy = np.meshgrid(x[::10],y[::10])
+u, v = double_gyre(0, (xx, yy))
+plt.quiver(xx,yy,u,v)
+for line in attracting_iles:
+    plt.plot(line[:, 0],line[:, 1], 'b', linewidth=3)
+for line in repelling_iles:
+    plt.plot(line[:, 0],line[:, 1], 'r', linewidth=3)
+```
+![alt text](https://github.com/hokiepete/docs/blob/main/images/double_gyre_iles.png)
+
 
 ```import numpy as np
 import matplotlib.pyplot as plt
@@ -24,7 +57,7 @@ from dynlab.flows import double_gyre
 x = np.linspace(0, 20000, 101)
 y = np.linspace(-4000, 4000, 101)
 u, v = bickley_jet(0, np.meshgrid(x, y))
-attraction_rate, repulsion_rate = AttractionRate().compute(x, y, u=u, v=v, edge_order=2)
+attraction_rate = AttractionRate().compute(x, y, u=u, v=v, edge_order=2)
 # note that lower values of the attraction rate field equate to higher levels of attraction
 # so we'll plot the negative of the attraction rate field to highlight areas of greatest attraction.
 plt.pcolormesh(x, y, -attraction_rate, shading='gouraud')
@@ -37,7 +70,7 @@ from dynlab.diagnostics import Rhodot
 from dynlab.flows import bead_on_a_rotating_hoop
 x = np.linspace(-1, 1, 401)*3
 y = np.linspace(-1, 1, 401)*2.5
-rhodot, nudot = Rhodot().compute(x, y, f=bead_on_a_rotating_hoop, t=0, edge_order=2)
+rhodot, nudot = TrajectoryRepulsionRate().compute(x, y, f=bead_on_a_rotating_hoop, t=0, edge_order=2)
 plt.pcolormesh(x, y, rhodot, shading='gouraud')
 ```
 ![alt text](https://github.com/hokiepete/docs/blob/main/images/bead_on_a_rotating_hoop_rhodot.png)
