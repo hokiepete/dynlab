@@ -4,14 +4,14 @@ Dynlab is a python package to make dynamical systems analysis faster and easier,
 
 Currently supported Lagrangian diagnostics are:\
     Finite-Time Lyapunov Exponent: `FTLE`\
-    Lagrangian Coherent Structures: `LCS`\
+    Lagrangian Coherent Structures: `LCS`
 
 Currently supported Eulerian diagnostics are:\
     Attraction Rate: `AttractionRate`\
     Repulsion Rate: `RepulsionRate`\
     infinitesimal Lyapunov ExponentS: `iLES`\
     Trajectory Repulsion Rate: `TrajectoryRepulsionRate`\
-    Trajectory Repulsion Ratio: `TrajectoryRepulsionRatio`\
+    Trajectory Repulsion Ratio: `TrajectoryRepulsionRatio`
 
 This package is readily available on pypi and can be easily installed with the command `pip install dynlab`.
 Note that dynlab is written with python 3.11 and you may need to update your python installation to take advantage of it.
