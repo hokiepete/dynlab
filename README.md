@@ -81,7 +81,7 @@ from dynlab.diagnostics import Rhodot
 from dynlab.flows import bead_on_a_rotating_hoop
 x = np.linspace(-1, 1, 401)*3
 y = np.linspace(-1, 1, 401)*2.5
-rhodot, nudot = TrajectoryRepulsionRate().compute(x, y, f=bead_on_a_rotating_hoop, t=0, edge_order=2)
+rhodot = TrajectoryRepulsionRate().compute(x, y, f=bead_on_a_rotating_hoop, t=0, edge_order=2)
 plt.pcolormesh(x, y, rhodot, shading='gouraud')
 ```
 ![alt text](https://github.com/hokiepete/docs/blob/main/images/bead_on_a_rotating_hoop_rhodot.png)
